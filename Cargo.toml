@@ -1,49 +1,24 @@
 [package]
-name = "crossterm"
-version = "0.11.0"
+name = "crossterm_input"
+version = "0.4.1"
 authors = ["T. Post"]
-description = "An crossplatform terminal library for manipulating terminals."
-repository = "https://github.com/crossterm-rs/crossterm"
-documentation = "https://docs.rs/crossterm/"
+description = "A cross-platform library for reading userinput."
+repository = "https://github.com/crossterm-rs/crossterm-input"
+documentation = "https://docs.rs/crossterm_input/"
 license = "MIT"
-keywords = ["console", "color", "cursor", "input", "terminal"]
+keywords = ["input", "keys", "crossterm", "events", "terminal"]
 exclude = ["target", "Cargo.lock"]
 readme = "README.md"
 edition = "2018"
 
-[features]
-default = ["cursor", "style","terminal","screen","input"]
+[target.'cfg(windows)'.dependencies]
+winapi = { version =  "0.3.8", features = ["winnt", "winuser"] }
+crossterm_winapi = { version = "0.2.1" }
 
-cursor = ["crossterm_cursor"]
-style = ["crossterm_style"]
-terminal = ["crossterm_terminal"]
-screen = ["crossterm_screen"]
-input = ["crossterm_input"]
-
-[workspace]
-
-members = [
-    "crossterm_winapi",
-    "crossterm_utils",
-    "crossterm_cursor",
-    "crossterm_style",
-    "crossterm_terminal",
-    "crossterm_input",
-    "crossterm_screen"
-]
-
-exclude = [
-    "examples/program_examples"
-]
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.51"
 
 [dependencies]
-crossterm_screen =   { path = "./crossterm_screen", version = "0.3.0"  , optional = true  }
-crossterm_cursor =   { path = "./crossterm_cursor", version = "0.3.0"  , optional = true  }
-crossterm_terminal = { path = "./crossterm_terminal", version = "0.3.0", optional = true  }
-crossterm_style =    { path = "./crossterm_style", version = "0.5.0"   , optional = true  }
-crossterm_input =    { path = "./crossterm_input", version = "0.4.0"   , optional = true  }
-crossterm_utils =    { path = "./crossterm_utils", version = "0.3.0"   , optional = false }
-
-[lib]
-name = "crossterm"
-path = "src/lib.rs"
+crossterm_utils = { version = "0.3.1" }
+crossterm_screen = { version = "0.3.1" }
+serde = { version = "1.0", features = ["derive"], optional = true }
