@@ -1,12 +1,17 @@
 //! This is a WINDOWS specific implementation for input related action.
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    mpsc::{self, Receiver, Sender},
-    Arc,
+use std::
+{
+    char,
+    io,
+    thread,
+    time::Duration,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender},
+        Arc,
+    }
 };
-use std::time::Duration;
-use std::{char, io, thread};
 
 use winapi::um::{
     wincon::{
@@ -26,7 +31,8 @@ use crossterm_winapi::{
     MouseEvent,
 };
 
-use super::{ITerminalInput, InputEvent, KeyEvent, MouseButton};
+use crate::input::ITerminalInput;
+use crate::{InputEvent, KeyEvent, MouseButton};
 
 pub struct WindowsInput;
 
@@ -409,7 +415,7 @@ fn parse_key_event_record(key_event: &KeyEventRecord) -> Option<KeyEvent> {
     }
 }
 
-fn parse_mouse_event_record(event: &MouseEvent) -> Option<super::MouseEvent> {
+fn parse_mouse_event_record(event: &MouseEvent) -> Option<crate::MouseEvent> {
     // NOTE (@imdaveho): xterm emulation takes the digits of the coords and passes them
     // individually as bytes into a buffer; the below cxbs and cybs replicates that and
     // mimicks the behavior; additionally, in xterm, mouse move is only handled when a
@@ -424,10 +430,10 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<super::MouseEvent> {
         EventFlags::PressOrRelease => {
             // Single click
             match event.button_state {
-                ButtonState::Release => Some(super::MouseEvent::Release(xpos as u16, ypos as u16)),
+                ButtonState::Release => Some(crate::MouseEvent::Release(xpos as u16, ypos as u16)),
                 ButtonState::FromLeft1stButtonPressed => {
                     // left click
-                    Some(super::MouseEvent::Press(
+                    Some(crate::MouseEvent::Press(
                         MouseButton::Left,
                         xpos as u16,
                         ypos as u16,
@@ -435,7 +441,7 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<super::MouseEvent> {
                 }
                 ButtonState::RightmostButtonPressed => {
                     // right click
-                    Some(super::MouseEvent::Press(
+                    Some(crate::MouseEvent::Press(
                         MouseButton::Right,
                         xpos as u16,
                         ypos as u16,
@@ -443,7 +449,7 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<super::MouseEvent> {
                 }
                 ButtonState::FromLeft2ndButtonPressed => {
                     // middle click
-                    Some(super::MouseEvent::Press(
+                    Some(crate::MouseEvent::Press(
                         MouseButton::Middle,
                         xpos as u16,
                         ypos as u16,
@@ -456,7 +462,7 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<super::MouseEvent> {
             // Click + Move
             // NOTE (@imdaveho) only register when mouse is not released
             if event.button_state != ButtonState::Release {
-                Some(super::MouseEvent::Hold(xpos as u16, ypos as u16))
+                Some(crate::MouseEvent::Hold(xpos as u16, ypos as u16))
             } else {
                 None
             }
@@ -466,13 +472,13 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<super::MouseEvent> {
             // NOTE (@imdaveho) from https://docs.microsoft.com/en-us/windows/console/mouse-event-record-str
             // if `button_state` is negative then the wheel was rotated backward, toward the user.
             if event.button_state != ButtonState::Negative {
-                Some(super::MouseEvent::Press(
+                Some(crate::MouseEvent::Press(
                     MouseButton::WheelUp,
                     xpos as u16,
                     ypos as u16,
                 ))
             } else {
-                Some(super::MouseEvent::Press(
+                Some(crate::MouseEvent::Press(
                     MouseButton::WheelDown,
                     xpos as u16,
                     ypos as u16,
