@@ -1,16 +1,14 @@
 //! This is a WINDOWS specific implementation for input related action.
 
-use std::
-{
-    char,
-    io,
-    thread,
-    time::Duration,
+use std::{
+    char, io,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, Sender},
         Arc,
-    }
+    },
+    thread,
+    time::Duration,
 };
 
 use winapi::um::{
@@ -34,7 +32,7 @@ use crossterm_winapi::{
 use crate::input::ITerminalInput;
 use crate::{InputEvent, KeyEvent, MouseButton};
 
-pub struct WindowsInput;
+pub(crate) struct WindowsInput;
 
 impl WindowsInput {
     pub fn new() -> WindowsInput {

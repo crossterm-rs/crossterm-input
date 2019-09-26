@@ -134,17 +134,17 @@
 
 use std::io;
 
+pub use crossterm_screen::{IntoRawMode, RawScreen};
+pub use crossterm_utils::Result;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use crossterm_screen::{IntoRawMode, RawScreen};
-pub use crossterm_utils::Result;
-pub use self::input::{AsyncReader, SyncReader};
 use self::input::ITerminalInput;
 #[cfg(unix)]
 pub use self::input::UnixInput;
 #[cfg(windows)]
 pub use self::input::WindowsInput;
+pub use self::input::{AsyncReader, SyncReader};
 
 mod input;
 mod sys;
@@ -241,7 +241,7 @@ pub enum KeyEvent {
 /// use crossterm_input::{Result, TerminalInput, RawScreen};
 ///
 /// fn main() -> Result<()> {
-/// let color = TerminalInput::new();
+///     let color = TerminalInput::new();
 ///     // read a single char
 ///     let char = color.read_char()?;
 ///     // read a single line

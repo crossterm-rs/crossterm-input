@@ -1,12 +1,11 @@
 //! This is a UNIX specific implementation for input related action.
 
 use std::sync::{
+    atomic::{AtomicBool, Ordering},
     char,
     io::{self, Read},
-    str, thread,
-    atomic::{AtomicBool, Ordering},
     mpsc::{self, Receiver, Sender},
-    Arc,
+    str, thread, Arc,
 };
 
 use crossterm_utils::{csi, write_cout, ErrorKind, Result};
@@ -16,7 +15,7 @@ use crate::sys::unix::{get_tty, read_char_raw};
 use crate::input::ITerminalInput;
 use crate::{InputEvent, KeyEvent, MouseButton, MouseEvent};
 
-pub struct UnixInput;
+pub(crate) struct UnixInput;
 
 impl UnixInput {
     pub fn new() -> UnixInput {
