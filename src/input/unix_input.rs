@@ -12,8 +12,7 @@ use crossterm_utils::{csi, write_cout, ErrorKind, Result};
 
 use crate::sys::unix::{get_tty, read_char_raw};
 
-use crate::input::Input;
-use crate::{InputEvent, KeyEvent, MouseButton, MouseEvent};
+use crate::{input::Input, InputEvent, KeyEvent, MouseButton, MouseEvent};
 
 pub(crate) struct UnixInput;
 

@@ -29,8 +29,7 @@ use crossterm_winapi::{
     MouseEvent,
 };
 
-use crate::input::Input;
-use crate::{InputEvent, KeyEvent, MouseButton};
+use crate::{input::Input, InputEvent, KeyEvent, MouseButton};
 
 pub(crate) struct WindowsInput;
 

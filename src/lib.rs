@@ -233,8 +233,6 @@ pub enum KeyEvent {
 ///
 /// ## Examples
 ///
-/// Basic usage:
-///
 /// ```no_run
 /// // You can replace the following line with `use crossterm::TerminalInput;`
 /// // if you're using the `crossterm` crate with the `style` feature enabled.
