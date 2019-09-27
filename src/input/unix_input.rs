@@ -1,11 +1,15 @@
 //! This is a UNIX specific implementation for input related action.
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
+use std::{
     char,
     io::{self, Read},
-    mpsc::{self, Receiver, Sender},
-    str, thread, Arc,
+    str,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender},
+        Arc,
+    },
+    thread,
 };
 
 use crossterm_utils::{csi, write_cout, ErrorKind, Result};
