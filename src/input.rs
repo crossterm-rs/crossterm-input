@@ -21,7 +21,7 @@ pub(crate) mod windows_input;
 ///
 /// This trait is implemented for Windows and UNIX systems.
 /// Unix is using the 'TTY' and windows is using 'libc' C functions to read the input.
-pub(crate) trait ITerminalInput {
+pub(crate) trait Input {
     /// Read one character from the user input
     fn read_char(&self) -> Result<char>;
     /// Read the input asynchronously from the user.

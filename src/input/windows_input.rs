@@ -29,7 +29,7 @@ use crossterm_winapi::{
     MouseEvent,
 };
 
-use crate::input::ITerminalInput;
+use crate::input::Input;
 use crate::{InputEvent, KeyEvent, MouseButton};
 
 pub(crate) struct WindowsInput;
@@ -45,7 +45,7 @@ const ENABLE_MOUSE_MODE: u32 = 0x0010 | 0x0080 | 0x0008;
 // NOTE (@imdaveho): this global var is terrible -> move it elsewhere...
 static mut ORIG_MODE: u32 = 0;
 
-impl ITerminalInput for WindowsInput {
+impl Input for WindowsInput {
     fn read_char(&self) -> Result<char> {
         // _getwch is without echo and _getwche is with echo
         let pressed_char = unsafe { _getwche() };

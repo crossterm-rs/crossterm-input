@@ -130,7 +130,7 @@
 //! ---------------------------------------------------------------------------------------------------------------------------------------------
 //! More robust and complete examples on all input aspects like mouse, keys could be found [here](https://github.com/crossterm-rs/crossterm/tree/master/examples/).
 
-#![deny(unused_imports)]
+#![deny(unused_imports, unused_must_use)]
 
 use std::io;
 
@@ -139,12 +139,12 @@ pub use crossterm_utils::Result;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use self::input::{AsyncReader, SyncReader};
-use self::input::ITerminalInput;
 #[cfg(unix)]
 use self::input::unix_input::UnixInput;
 #[cfg(windows)]
 use self::input::windows_input::WindowsInput;
+use self::input::Input;
+pub use self::input::{AsyncReader, SyncReader};
 
 mod input;
 mod sys;

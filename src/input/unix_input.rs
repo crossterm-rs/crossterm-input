@@ -12,7 +12,7 @@ use crossterm_utils::{csi, write_cout, ErrorKind, Result};
 
 use crate::sys::unix::{get_tty, read_char_raw};
 
-use crate::input::ITerminalInput;
+use crate::input::Input;
 use crate::{InputEvent, KeyEvent, MouseButton, MouseEvent};
 
 pub(crate) struct UnixInput;
@@ -23,7 +23,7 @@ impl UnixInput {
     }
 }
 
-impl ITerminalInput for UnixInput {
+impl Input for UnixInput {
     fn read_char(&self) -> Result<char> {
         read_char_raw()
     }
