@@ -4,14 +4,14 @@
 use crossterm_utils::Result;
 
 #[cfg(unix)]
-pub use self::unix_input::{AsyncReader, SyncReader, UnixInput};
+pub use self::unix_input::{AsyncReader, SyncReader};
 #[cfg(windows)]
-pub use self::windows_input::{AsyncReader, SyncReader, WindowsInput};
+pub use self::windows_input::{AsyncReader, SyncReader};
 
 #[cfg(unix)]
-mod unix_input;
+pub(crate) mod unix_input;
 #[cfg(windows)]
-mod windows_input;
+pub(crate) mod windows_input;
 
 /// This trait defines the actions that can be performed with the terminal input.
 /// This trait can be implemented so that a concrete implementation of the ITerminalInput can fulfill

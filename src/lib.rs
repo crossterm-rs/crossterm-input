@@ -139,12 +139,12 @@ pub use crossterm_utils::Result;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub use self::input::{AsyncReader, SyncReader};
 use self::input::ITerminalInput;
 #[cfg(unix)]
-pub use self::input::UnixInput;
+use self::input::unix_input::UnixInput;
 #[cfg(windows)]
-pub use self::input::WindowsInput;
-pub use self::input::{AsyncReader, SyncReader};
+use self::input::windows_input::WindowsInput;
 
 mod input;
 mod sys;
@@ -236,30 +236,30 @@ pub enum KeyEvent {
 /// Basic usage:
 ///
 /// ```no_run
-/// // You can replace the following line with `use crossterm::TerminalColor;`
+/// // You can replace the following line with `use crossterm::TerminalInput;`
 /// // if you're using the `crossterm` crate with the `style` feature enabled.
 /// use crossterm_input::{Result, TerminalInput, RawScreen};
 ///
 /// fn main() -> Result<()> {
-///     let color = TerminalInput::new();
+///     let input = TerminalInput::new();
 ///     // read a single char
-///     let char = color.read_char()?;
+///     let char = input.read_char()?;
 ///     // read a single line
-///     let line = color.read_line()?;
+///     let line = input.read_line()?;
 ///
 ///     // make sure to enable raw screen when reading input events.
 ///     let screen = RawScreen::into_raw_mode();
 ///
 ///     // create async reader
-///     let mut async_stdin = color.read_async();
+///     let mut async_stdin = input.read_async();
 ///
 ///     // create async reader
-///     let mut sync_stdin = color.read_sync();
+///     let mut sync_stdin = input.read_sync();
 ///
 ///     // enable mouse input events
-///     color.enable_mouse_mode()?;
+///     input.enable_mouse_mode()?;
 ///     // disable mouse input events
-///     color.disable_mouse_mode()
+///     input.disable_mouse_mode()
 /// }
 /// ```
 pub struct TerminalInput {
@@ -333,7 +333,20 @@ impl TerminalInput {
     ///   Not sure what this is? Please checkout the 'crossterm_screen' crate.
     ///
     /// # Examples
-    /// Please checkout the example folder in the repository.
+    /// ```no_run
+    /// use std::{thread, time::Duration};
+    /// use crossterm_input::input;
+    ///
+    /// let mut async_stdin = input().read_async();
+    ///
+    /// loop {
+    ///     if let Some(key_event) = async_stdin.next() {
+    ///         /* check which event occurred here*/
+    ///     }
+    ///
+    ///     thread::sleep(Duration::from_millis(50));
+    /// }
+    ///  ```
     pub fn read_async(&self) -> AsyncReader {
         self.input.read_async()
     }
@@ -354,7 +367,20 @@ impl TerminalInput {
     ///   Not sure what this is? Please checkout the 'crossterm_screen' crate.
     ///
     /// # Examples
-    /// Please checkout the example folder in the repository.
+    /// ```no_run
+    /// use std::{thread, time::Duration};
+    /// use crossterm_input::input;
+    ///
+    /// let mut async_stdin = input().read_until_async(b'x');
+    ///
+    /// loop {
+    ///     if let Some(key_event) = async_stdin.next() {
+    ///         /* check which event occurred here */
+    ///     }
+    ///
+    ///     thread::sleep(Duration::from_millis(50));
+    /// }
+    ///  ```
     pub fn read_until_async(&self, delimiter: u8) -> AsyncReader {
         self.input.read_until_async(delimiter)
     }
@@ -368,7 +394,18 @@ impl TerminalInput {
     /// - Readings will be blocking calls.
     ///
     /// # Examples
-    /// Please checkout the example folder in the repository.
+    /// ```no_run
+    /// use std::{thread, time::Duration};
+    /// use crossterm_input::input;
+    ///
+    /// let mut sync_stdin = input().read_sync();
+    ///
+    /// loop {
+    ///     if let Some(key_event) = sync_stdin.next() {
+    ///         /* check which event occurred here*/
+    ///     }
+    /// }
+    ///  ```
     pub fn read_sync(&self) -> SyncReader {
         self.input.read_sync()
     }
