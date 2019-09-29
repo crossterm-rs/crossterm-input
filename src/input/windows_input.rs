@@ -394,16 +394,16 @@ fn parse_key_event_record(key_event: &KeyEventRecord) -> Option<KeyEvent> {
                         }
                         _ => None,
                     }
-                } else if key_state.has_state(SHIFT_PRESSED) {
-                    // Shift + key press, essentially the same as single key press
-                    // Separating to be explicit about the Shift press.
-                    if character == '\t' {
-                        Some(KeyEvent::BackTab)
-                    } else {
-                        Some(KeyEvent::Tab)
-                    }
+                } else if key_state.has_state(SHIFT_PRESSED) && character == '\t' {
+                    Some(KeyEvent::BackTab)
                 } else {
-                    Some(KeyEvent::Char(character))
+                    if character == '\t' {
+                        Some(KeyEvent::Tab)
+                    } else {
+                        // Shift + key press, essentially the same as single key press
+                        // Separating to be explicit about the Shift press.
+                        Some(KeyEvent::Char(character))
+                    }
                 }
             } else {
                 None
