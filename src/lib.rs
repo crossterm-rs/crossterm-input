@@ -140,9 +140,9 @@ pub use crossterm_utils::Result;
 use serde::{Deserialize, Serialize};
 
 #[cfg(unix)]
-use self::input::unix_input::UnixInput;
+use self::input::unix::UnixInput;
 #[cfg(windows)]
-use self::input::windows_input::WindowsInput;
+use self::input::windows::WindowsInput;
 use self::input::Input;
 pub use self::input::{AsyncReader, SyncReader};
 
