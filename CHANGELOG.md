@@ -1,3 +1,9 @@
+# Version master
+
+- Internal refactoring (no breaking changes)
+- Removed unsafe `static mut`
+- Documentation update
+
 # Version 0.4.1
 
 - Maintenance release only
