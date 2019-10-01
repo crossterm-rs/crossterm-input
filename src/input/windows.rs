@@ -207,8 +207,9 @@ impl Iterator for SyncReader {
     /// `None` doesn't mean that the iteration is finished. See the
     /// [`SyncReader`](struct.SyncReader.html) documentation for more information.
     fn next(&mut self) -> Option<Self::Item> {
-        // TODO Don't unwrap, consume and return `None` to sync behavior with the UNIX
-        read_single_event().unwrap()
+        // This synces the behaviour with the unix::SyncReader (& documentation) where
+        // None is returned in case of error.
+        read_single_event().unwrap_or(None)
     }
 }
 
