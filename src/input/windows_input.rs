@@ -235,7 +235,7 @@ fn read_single_event() -> Result<Option<InputEvent>> {
 }
 
 /// partially inspired by: https://github.com/retep998/wio-rs/blob/master/src/console.rs#L130
-fn read_input_events() -> Result<(u32, Vec<InputEvent>)> {
+pub fn read_input_events() -> Result<(u32, Vec<InputEvent>)> {
     let console = Console::from(Handle::current_in_handle()?);
 
     let result = console.read_console_input()?;

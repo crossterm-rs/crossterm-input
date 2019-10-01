@@ -17,7 +17,7 @@ mod input;
 #[cfg(unix)]
 mod unix_input;
 #[cfg(windows)]
-mod windows_input;
+pub mod windows_input;
 
 /// This trait defines the actions that can be performed with the terminal input.
 /// This trait can be implemented so that a concrete implementation of the ITerminalInput can fulfill
