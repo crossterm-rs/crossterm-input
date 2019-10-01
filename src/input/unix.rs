@@ -1,23 +1,23 @@
 //! This is a UNIX specific implementation for input related action.
 
-use std::char;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    mpsc::{self, Receiver, Sender},
-    Arc,
-};
 use std::{
+    char,
     io::{self, Read},
-    str, thread,
+    str,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender},
+        Arc,
+    },
+    thread,
 };
 
 use crossterm_utils::{csi, write_cout, ErrorKind, Result};
 
 use crate::sys::unix::{get_tty, read_char_raw};
+use crate::{input::Input, InputEvent, KeyEvent, MouseButton, MouseEvent};
 
-use super::{ITerminalInput, InputEvent, KeyEvent, MouseButton, MouseEvent};
-
-pub struct UnixInput;
+pub(crate) struct UnixInput;
 
 impl UnixInput {
     pub fn new() -> UnixInput {
@@ -25,7 +25,7 @@ impl UnixInput {
     }
 }
 
-impl ITerminalInput for UnixInput {
+impl Input for UnixInput {
     fn read_char(&self) -> Result<char> {
         read_char_raw()
     }

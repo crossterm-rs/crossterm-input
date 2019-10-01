@@ -1,13 +1,17 @@
 //! This is a WINDOWS specific implementation for input related action.
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    mpsc::{self, Receiver, Sender},
-    Arc,
+use std::{
+    char, io,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender},
+        Arc, Mutex,
+    },
+    thread,
+    time::Duration,
 };
-use std::time::Duration;
-use std::{char, io, thread};
 
+use crossterm_utils::Result;
 use winapi::um::{
     wincon::{
         LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED, RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED, SHIFT_PRESSED,
@@ -20,15 +24,39 @@ use winapi::um::{
     },
 };
 
-use crossterm_utils::Result;
 use crossterm_winapi::{
     ButtonState, Console, ConsoleMode, EventFlags, Handle, InputEventType, KeyEventRecord,
     MouseEvent,
 };
+use lazy_static::lazy_static;
 
-use super::{ITerminalInput, InputEvent, KeyEvent, MouseButton};
+use crate::{input::Input, InputEvent, KeyEvent, MouseButton};
 
-pub struct WindowsInput;
+const ENABLE_MOUSE_MODE: u32 = 0x0010 | 0x0080 | 0x0008;
+
+lazy_static! {
+    static ref ORIGINAL_CONSOLE_MODE: Mutex<Option<u32>> = Mutex::new(None);
+}
+
+/// Initializes the default console color. It will will be skipped if it has already been initialized.
+fn init_original_console_mode(original_mode: u32) {
+    let mut lock = ORIGINAL_CONSOLE_MODE.lock().unwrap();
+
+    if lock.is_none() {
+        *lock = Some(original_mode);
+    }
+}
+
+/// Returns the original console color, make sure to call `init_console_color` before calling this function. Otherwise this function will panic.
+fn original_console_mode() -> u32 {
+    // safe unwrap, initial console color was set with `init_console_color` in `WinApiColor::new()`
+    ORIGINAL_CONSOLE_MODE
+        .lock()
+        .unwrap()
+        .expect("Original console mode not set")
+}
+
+pub(crate) struct WindowsInput;
 
 impl WindowsInput {
     pub fn new() -> WindowsInput {
@@ -36,12 +64,7 @@ impl WindowsInput {
     }
 }
 
-const ENABLE_MOUSE_MODE: u32 = 0x0010 | 0x0080 | 0x0008;
-
-// NOTE (@imdaveho): this global var is terrible -> move it elsewhere...
-static mut ORIG_MODE: u32 = 0;
-
-impl ITerminalInput for WindowsInput {
+impl Input for WindowsInput {
     fn read_char(&self) -> Result<char> {
         // _getwch is without echo and _getwche is with echo
         let pressed_char = unsafe { _getwche() };
@@ -106,16 +129,15 @@ impl ITerminalInput for WindowsInput {
     fn enable_mouse_mode(&self) -> Result<()> {
         let mode = ConsoleMode::from(Handle::current_in_handle()?);
 
-        unsafe {
-            ORIG_MODE = mode.mode()?;
-            mode.set_mode(ENABLE_MOUSE_MODE)?;
-        }
+        init_original_console_mode(mode.mode()?);
+        mode.set_mode(ENABLE_MOUSE_MODE)?;
+
         Ok(())
     }
 
     fn disable_mouse_mode(&self) -> Result<()> {
         let mode = ConsoleMode::from(Handle::current_in_handle()?);
-        mode.set_mode(unsafe { ORIG_MODE })?;
+        mode.set_mode(original_console_mode())?;
         Ok(())
     }
 }
@@ -391,16 +413,16 @@ fn parse_key_event_record(key_event: &KeyEventRecord) -> Option<KeyEvent> {
                         }
                         _ => None,
                     }
-                } else if key_state.has_state(SHIFT_PRESSED) {
-                    // Shift + key press, essentially the same as single key press
-                    // Separating to be explicit about the Shift press.
-                    if character == '\t' {
-                        Some(KeyEvent::BackTab)
-                    } else {
-                        Some(KeyEvent::Tab)
-                    }
+                } else if key_state.has_state(SHIFT_PRESSED) && character == '\t' {
+                    Some(KeyEvent::BackTab)
                 } else {
-                    Some(KeyEvent::Char(character))
+                    if character == '\t' {
+                        Some(KeyEvent::Tab)
+                    } else {
+                        // Shift + key press, essentially the same as single key press
+                        // Separating to be explicit about the Shift press.
+                        Some(KeyEvent::Char(character))
+                    }
                 }
             } else {
                 None
@@ -409,7 +431,7 @@ fn parse_key_event_record(key_event: &KeyEventRecord) -> Option<KeyEvent> {
     }
 }
 
-fn parse_mouse_event_record(event: &MouseEvent) -> Option<super::MouseEvent> {
+fn parse_mouse_event_record(event: &MouseEvent) -> Option<crate::MouseEvent> {
     // NOTE (@imdaveho): xterm emulation takes the digits of the coords and passes them
     // individually as bytes into a buffer; the below cxbs and cybs replicates that and
     // mimicks the behavior; additionally, in xterm, mouse move is only handled when a
@@ -424,10 +446,10 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<super::MouseEvent> {
         EventFlags::PressOrRelease => {
             // Single click
             match event.button_state {
-                ButtonState::Release => Some(super::MouseEvent::Release(xpos as u16, ypos as u16)),
+                ButtonState::Release => Some(crate::MouseEvent::Release(xpos as u16, ypos as u16)),
                 ButtonState::FromLeft1stButtonPressed => {
                     // left click
-                    Some(super::MouseEvent::Press(
+                    Some(crate::MouseEvent::Press(
                         MouseButton::Left,
                         xpos as u16,
                         ypos as u16,
@@ -435,7 +457,7 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<super::MouseEvent> {
                 }
                 ButtonState::RightmostButtonPressed => {
                     // right click
-                    Some(super::MouseEvent::Press(
+                    Some(crate::MouseEvent::Press(
                         MouseButton::Right,
                         xpos as u16,
                         ypos as u16,
@@ -443,7 +465,7 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<super::MouseEvent> {
                 }
                 ButtonState::FromLeft2ndButtonPressed => {
                     // middle click
-                    Some(super::MouseEvent::Press(
+                    Some(crate::MouseEvent::Press(
                         MouseButton::Middle,
                         xpos as u16,
                         ypos as u16,
@@ -456,7 +478,7 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<super::MouseEvent> {
             // Click + Move
             // NOTE (@imdaveho) only register when mouse is not released
             if event.button_state != ButtonState::Release {
-                Some(super::MouseEvent::Hold(xpos as u16, ypos as u16))
+                Some(crate::MouseEvent::Hold(xpos as u16, ypos as u16))
             } else {
                 None
             }
@@ -466,13 +488,13 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<super::MouseEvent> {
             // NOTE (@imdaveho) from https://docs.microsoft.com/en-us/windows/console/mouse-event-record-str
             // if `button_state` is negative then the wheel was rotated backward, toward the user.
             if event.button_state != ButtonState::Negative {
-                Some(super::MouseEvent::Press(
+                Some(crate::MouseEvent::Press(
                     MouseButton::WheelUp,
                     xpos as u16,
                     ypos as u16,
                 ))
             } else {
-                Some(super::MouseEvent::Press(
+                Some(crate::MouseEvent::Press(
                     MouseButton::WheelDown,
                     xpos as u16,
                     ypos as u16,
