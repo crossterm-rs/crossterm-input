@@ -4,7 +4,7 @@
 
 This crate allows you to read the user input cross-platform. 
 It supports all UNIX and Windows terminals down to Windows 7 (not all terminals are tested
-see [Tested Terminals](#tested-terminals) for more info)
+see [Tested Terminals](https://github.com/crossterm-rs/crossterm/blob/master/README.md#tested-terminals) for more info).
 
 `crossterm_input` is a sub-crate of the [crossterm](https://crates.io/crates/crossterm) crate. You can use it
 directly, but it's **highly recommended** to use the [crossterm](https://crates.io/crates/crossterm) crate with
@@ -20,124 +20,69 @@ for more info).
 Issues in this repository are disabled for the same reason. Please, report all issues in the
 [crossterm-rs/crossterm](https://github.com/crossterm-rs/crossterm/issues) repository.
 
-## Table of contents:
-
-- [Getting started](#getting-started)
-- [Useful links](#useful-links)
-- [Features](#features)
-- [Examples](#examples)
-- [Tested Terminals](#tested-terminals)
-- [Authors](#authors)
-- [License](#license)
-
-## Getting Started
-
-All examples of how `crossterm_input` works can be found in the
-[examples](https://github.com/crossterm-rs/examples) repository.
-
-Add the `crossterm_input` package to your `Cargo.toml` file.
-
-```
-[dependencies]
-crossterm_input = "0.4"
-```
-
-Import the `crossterm_input` modules you want to use.
-
-```rust  
-pub use crossterm_input::{input, AsyncReader, InputEvent, KeyEvent, MouseButton, MouseEvent, SyncReader, TerminalInput};
-```
-
-### Useful Links
-
-- [Documentation](https://docs.rs/crossterm_input/)
-- [Crates.io](https://crates.io/crates/crossterm_input)
-- [Book](https://crossterm-rs.github.io/crossterm/docs/input.html)
-- [Examples](https://github.com/crossterm-rs/examples)
-
 ## Features
-
-These are the features of this crate:
 
 - Cross-platform
 - Multi-threaded (send, sync)
-- Detailed Documentation
-- Few Dependencies
+- Detailed documentation
+- Few dependencies
 - Input
-    - Read character
-    - Read line
-    - Read key input events (async / sync)
-    - Read mouse input events (press, release, position, button)
-    - RawScreen (from `crossterm_screen`)
-    
-## Examples
+  - Read character
+  - Read line
+  - Read key input events (async / sync)
+  - Read mouse input events (press, release, position, button)
+  - Raw screen
 
-The [examples](https://github.com/crossterm-rs/examples) repository has more complete and verbose examples.
+## Getting Started
 
-_Simple Readings_
-```rust 
-let mut input = input();
+<details>
+<summary>
+Click to show Cargo.toml.
+</summary>
 
- match input.read_char() {
-    Ok(s) => println!("char typed: {}", s),
-    Err(e) => println!("char error : {}", e),
- }
- 
- match input.read_line() {
-     Ok(s) => println!("string typed: {}", s),
-     Err(e) => println!("error: {}", e),
- }
+```toml
+[dependencies]
+# All crossterm features are enabled by default.
+crossterm = "0.11"
 ```
 
-_Read input events synchronously or asynchronously._
+</details>
+<p></p>
 
 ```rust
-// make sure to enable raw mode, this will make sure key events won't be handled by the terminal
-// it's self and allows crossterm to read the input and pass it back to you.
-let screen = RawScreen::into_raw_mode();
-    
-let mut input = input();
+use crossterm::{input, InputEvent, KeyEvent, MouseButton, MouseEvent, RawScreen, Result};
 
-// either read the input synchronously 
-let stdin = input.read_sync();
- 
-// or asynchronously
-let stdin = input.read_async();
+fn main() -> Result<()> {
+    // Keep _raw around, raw mode will be disabled on the _raw is dropped
+    let _raw = RawScreen::into_raw_mode()?;
 
-if let Some(key_event) = stdin.next() {
-     match key_event {
-         InputEvent::Keyboard(event: KeyEvent) => match event { /* check key event */ }
-         InputEvent::Mouse(event: MouseEvent) => match event { /* check mouse event */ }
-     }
- }
+    let input = input();
+    input.enable_mouse_mode()?;
+
+    let mut sync_stdin = input.read_sync();
+
+    loop {
+        if let Some(event) = sync_stdin.next() {
+            match event {
+                InputEvent::Keyboard(KeyEvent::Esc) => break,
+                InputEvent::Keyboard(KeyEvent::Left) => println!("Left arrow"),
+                InputEvent::Mouse(MouseEvent::Press(MouseButton::Left, col, row)) => {
+                    println!("Left mouse button pressed at {}x{}", col, row);
+                }
+                _ => println!("Other event {:?}", event),
+            }
+        }
+    }
+
+    input.disable_mouse_mode()
+} // <- _raw dropped = raw mode disabled
 ```
 
-_Enable mouse input events._
+## Other Resources
 
-```rust
-let input = input();
-
-// enable mouse events to be captured.
-input.enable_mouse_mode().unwrap();
-
-// disable mouse events to be captured.
-input.disable_mouse_mode().unwrap();
-```
-
-## Tested terminals
-
-- Windows Powershell
-    - Windows 10 (pro)
-- Windows CMD
-    - Windows 10 (pro)
-    - Windows 8.1 (N)
-- Ubuntu Desktop Terminal
-    - Ubuntu 17.10
-- (Arch, Manjaro) KDE Konsole
-- Linux Mint
-
-This crate supports all Unix terminals and windows terminals down to Windows 7 but not all of them have been tested.
-If you have used this library for a terminal other than the above list without issues feel free to add it to the above list, I really would appreciate it.
+- [API documentation](https://docs.rs/crossterm_input/) (with other examples)
+- [Examples repository](https://github.com/crossterm-rs/examples)
+- [The Book](https://crossterm-rs.github.io/crossterm/docs/index.html)
 
 ## Authors
 
@@ -146,7 +91,7 @@ If you have used this library for a terminal other than the above list without i
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE.md](./LICENSE) file for details
+This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details
 
 [s1]: https://img.shields.io/crates/v/crossterm_input.svg
 [l1]: https://crates.io/crates/crossterm_input
