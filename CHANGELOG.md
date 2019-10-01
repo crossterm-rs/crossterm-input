@@ -3,7 +3,11 @@
 - Internal refactoring (no breaking changes)
 - Removed unsafe `static mut`
 - Documentation update
-- Fixed the `KeyEvent` `BackTab` vs `Tab` bug on the Windows platform 
+
+## Windows only
+
+- Fixed the `KeyEvent` `BackTab` vs `Tab` bug
+- `SyncReader` `Iterator` implementation returns `None` from the `next` method in case of error 
 
 # Version 0.4.1
 
