@@ -142,43 +142,146 @@ impl Input for WindowsInput {
     }
 }
 
-/// This type allows you to read input synchronously, which means that reading call will be blocking ones.
+/// A synchronous input reader (blocking).
 ///
-/// This type is an iterator, and could be used to iterate over input events.
+/// `SyncReader` implements the [`Iterator`](https://doc.rust-lang.org/std/iter/index.html#iterator)
+/// trait. Documentation says:
 ///
-/// If you don't want to block your calls use [AsyncReader](./LINK), which will read input on the background and queue it for you to read.
+/// > An iterator has a method, `next`, which when called, returns an `Option<Item>`. `next` will return
+/// > `Some(Item)` as long as there are elements, and once they've all been exhausted, will return `None`
+/// > to indicate that iteration is finished. Individual iterators may choose to resume iteration, and
+/// > so calling `next` again may or may not eventually start returning `Some(Item)` again at some point.
+///
+/// `SyncReader` is an individual iterator and it doesn't use `None` to indicate that the iteration is
+/// finished. You can expect additional `Some(InputEvent)` after calling `next` even if you have already
+/// received `None`. Unfortunately, `None` means that an error occurred, but you're free to call `next`
+/// again. This behavior will be changed in the future to avoid errors consumption.  
+///
+/// # Notes
+///
+/// * It requires enabled raw mode (see the
+///   [`crossterm_screen`](https://docs.rs/crossterm_screen/) crate documentation to learn more).
+/// * See the [`AsyncReader`](struct.AsyncReader.html) if you want a non blocking reader.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::{thread, time::Duration};
+///
+/// use crossterm_input::{input, InputEvent, KeyEvent, RawScreen};
+///
+/// fn main() {
+///     println!("Press 'ESC' to quit.");
+///
+///     // Enable raw mode and keep the `_raw` around otherwise the raw mode will be disabled
+///     let _raw = RawScreen::into_raw_mode();
+///
+///     // Create an input from our screen
+///     let input = input();
+///
+///     // Create a sync reader
+///     let mut reader = input.read_sync();
+///
+///     loop {
+///         if let Some(event) = reader.next() { // Blocking call
+///             match event {
+///                 InputEvent::Keyboard(KeyEvent::Esc) => {
+///                     println!("Program closing ...");
+///                     break;
+///                  }
+///                  InputEvent::Mouse(event) => { /* Mouse event */ }
+///                  _ => { /* Other events */ }
+///             }
+///         }
+///         thread::sleep(Duration::from_millis(50));
+///     }
+/// } // `_raw` dropped <- raw mode disabled
+/// ```
 pub struct SyncReader;
 
 impl Iterator for SyncReader {
     type Item = InputEvent;
 
-    /// Read input from the user.
+    /// Tries to read the next input event (blocking).
     ///
-    /// If there are no keys pressed this will be a blocking call until there are.
-    /// This will return `None` in case of a failure and `Some(InputEvent) in case of an occurred input event.`
+    /// `None` doesn't mean that the iteration is finished. See the
+    /// [`SyncReader`](struct.SyncReader.html) documentation for more information.
     fn next(&mut self) -> Option<Self::Item> {
+        // TODO Don't unwrap, consume and return `None` to sync behavior with the UNIX
         read_single_event().unwrap()
     }
 }
 
-/// This type allows you to read the input asynchronously which means that input events are gathered on the background and will be queued for you to read.
+/// An asynchronous input reader (not blocking).
 ///
-/// **[SyncReader](./LINK)**
-/// If you want a blocking, or less resource consuming read to happen use `SyncReader`, this will leave a way all the thread and queueing and will be a blocking read.
+/// `AsyncReader` implements the [`Iterator`](https://doc.rust-lang.org/std/iter/index.html#iterator)
+/// trait. Documentation says:
 ///
-/// This type is an iterator, and could be used to iterate over input events.
+/// > An iterator has a method, `next`, which when called, returns an `Option<Item>`. `next` will return
+/// > `Some(Item)` as long as there are elements, and once they've all been exhausted, will return `None`
+/// > to indicate that iteration is finished. Individual iterators may choose to resume iteration, and
+/// > so calling `next` again may or may not eventually start returning `Some(Item)` again at some point.
 ///
-/// # Remarks
-/// - Threads spawned will be disposed of as soon the `AsyncReader` goes out of scope.
-/// - MPSC-channels are used to queue input events, this type implements an iterator of the rx side of the queue.
+/// `AsyncReader` is an individual iterator and it doesn't use `None` to indicate that the iteration is
+/// finished. You can expect additional `Some(InputEvent)` after calling `next` even if you have already
+/// received `None`.
+///
+/// # Notes
+///
+/// * It requires enabled raw mode (see the
+///   [`crossterm_screen`](https://docs.rs/crossterm_screen/) crate documentation to learn more).
+/// * A thread is spawned to read the input.
+/// * The reading thread is cleaned up when you drop the `AsyncReader`.
+/// * See the [`SyncReader`](struct.SyncReader.html) if you want a blocking,
+///   or a less resource hungry reader.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::{thread, time::Duration};
+///
+/// use crossterm_input::{input, InputEvent, KeyEvent, RawScreen};
+///
+/// fn main() {
+///     println!("Press 'ESC' to quit.");
+///
+///     // Enable raw mode and keep the `_raw` around otherwise the raw mode will be disabled
+///     let _raw = RawScreen::into_raw_mode();
+///
+///     // Create an input from our screen
+///     let input = input();
+///
+///     // Create an async reader
+///     let mut reader = input.read_async();
+///
+///     loop {
+///         if let Some(event) = reader.next() { // Not a blocking call
+///             match event {
+///                 InputEvent::Keyboard(KeyEvent::Esc) => {
+///                     println!("Program closing ...");
+///                     break;
+///                  }
+///                  InputEvent::Mouse(event) => { /* Mouse event */ }
+///                  _ => { /* Other events */ }
+///             }
+///         }
+///         thread::sleep(Duration::from_millis(50));
+///     }
+/// } // `reader` dropped <- thread cleaned up, `_raw` dropped <- raw mode disabled
+/// ```
 pub struct AsyncReader {
     event_rx: Receiver<InputEvent>,
     shutdown: Arc<AtomicBool>,
 }
 
 impl AsyncReader {
-    /// Construct a new instance of the `AsyncReader`.
-    /// The reading will immediately start when calling this function.
+    // TODO Should the new() really be public?
+    /// Creates a new `AsyncReader`.
+    ///
+    /// # Notes
+    ///
+    /// * A thread is spawned to read the input.
+    /// * The reading thread is cleaned up when you drop the `AsyncReader`.
     pub fn new(function: Box<dyn Fn(&Sender<InputEvent>, &Arc<AtomicBool>) + Send>) -> AsyncReader {
         let shutdown_handle = Arc::new(AtomicBool::new(false));
 
@@ -195,13 +298,15 @@ impl AsyncReader {
         }
     }
 
-    /// Stop the input event reading.
+    // TODO If we we keep the Drop semantics, do we really need this in the public API? It's useless as
+    //      there's no `start`, etc.
+    /// Stops the input reader.
     ///
-    /// You don't necessarily have to call this function because it will automatically be called when this reader goes out of scope.
+    /// # Notes
     ///
-    /// # Remarks
-    /// - Background thread will be closed.
-    /// - This will consume the handle you won't be able to restart the reading with this handle, create a new `AsyncReader` instead.
+    /// * The reading thread is cleaned up.
+    /// * You don't need to call this method, because it will be automatically called when the
+    ///   `AsyncReader` is dropped.
     pub fn stop(&mut self) {
         self.shutdown.store(true, Ordering::SeqCst);
     }
@@ -216,14 +321,10 @@ impl Drop for AsyncReader {
 impl Iterator for AsyncReader {
     type Item = InputEvent;
 
-    /// Check if there are input events to read.
+    /// Tries to read the next input event (not blocking).
     ///
-    /// It will return `None` when nothing is there to read, `Some(InputEvent)` if there are events to read.
-    ///
-    /// # Remark
-    /// - This is **not** a blocking call.
-    /// - When calling this method to fast after each other the reader might not have read a full byte sequence of some pressed key.
-    /// Make sure that you have some delay of a few ms when calling this method.
+    /// `None` doesn't mean that the iteration is finished. See the
+    /// [`AsyncReader`](struct.AsyncReader.html) documentation for more information.
     fn next(&mut self) -> Option<Self::Item> {
         let mut iterator = self.event_rx.try_iter();
         iterator.next()

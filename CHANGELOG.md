@@ -1,3 +1,10 @@
+# Version master
+
+- Internal refactoring (no breaking changes)
+- Removed unsafe `static mut`
+- Documentation update
+- Fixed the `KeyEvent` `BackTab` vs `Tab` bug on the Windows platform 
+
 # Version 0.4.1
 
 - Maintenance release only
