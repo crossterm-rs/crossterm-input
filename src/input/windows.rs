@@ -32,14 +32,6 @@ use lazy_static::lazy_static;
 
 use crate::{input::Input, InputEvent, KeyEvent, MouseButton};
 
-pub(crate) struct WindowsInput;
-
-impl WindowsInput {
-    pub fn new() -> WindowsInput {
-        WindowsInput
-    }
-}
-
 const ENABLE_MOUSE_MODE: u32 = 0x0010 | 0x0080 | 0x0008;
 
 lazy_static! {
@@ -62,6 +54,14 @@ fn original_console_mode() -> u32 {
         .lock()
         .unwrap()
         .expect("Original console mode not set")
+}
+
+pub(crate) struct WindowsInput;
+
+impl WindowsInput {
+    pub fn new() -> WindowsInput {
+        WindowsInput
+    }
 }
 
 impl Input for WindowsInput {
