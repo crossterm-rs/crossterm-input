@@ -3,6 +3,8 @@
 
 use crossterm_utils::Result;
 
+// TODO Do not reexport and create a new common AsyncReader structure in the same way as we
+//      with the TerminalCursor, TerminalInput, ...
 #[cfg(unix)]
 pub use self::unix::{AsyncReader, SyncReader};
 #[cfg(windows)]
