@@ -8,8 +8,7 @@ see [Tested Terminals](https://github.com/crossterm-rs/crossterm/blob/master/REA
 
 `crossterm_input` is a sub-crate of the [crossterm](https://crates.io/crates/crossterm) crate. You can use it
 directly, but it's **highly recommended** to use the [crossterm](https://crates.io/crates/crossterm) crate with
-the `input` feature enabled (see [feature flags](https://crossterm-rs.github.io/crossterm/docs/feature_flags.html)
-for more info).
+the `input` feature enabled.
 
 ## Future
 
@@ -82,7 +81,6 @@ fn main() -> Result<()> {
 
 - [API documentation](https://docs.rs/crossterm_input/) (with other examples)
 - [Examples repository](https://github.com/crossterm-rs/examples)
-- [The Book](https://crossterm-rs.github.io/crossterm/docs/index.html)
 
 ## Authors
 
