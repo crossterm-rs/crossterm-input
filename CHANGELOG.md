@@ -4,6 +4,8 @@
 - Removed unsafe `static mut`
 - Documentation update
 - Remove all references to the crossterm book
+- Mouse coordinates synchronized with the cursor (breaking)
+  - Upper/left reported as `(0, 0)`
 
 ## Windows only
 
