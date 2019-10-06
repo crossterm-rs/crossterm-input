@@ -21,4 +21,5 @@ libc = "0.2.51"
 [dependencies]
 crossterm_utils = { version = "0.3.1" }
 crossterm_screen = { version = "0.3.1" }
+lazy_static = "1.4"
 serde = { version = "1.0", features = ["derive"], optional = true }
