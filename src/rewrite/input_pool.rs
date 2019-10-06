@@ -12,6 +12,7 @@ use shrev::EventChannel;
 use std::sync::{LockResult, Mutex, MutexGuard};
 
 lazy_static! {
+    /// Static input pool that can be used to read input events.
     pub static ref INPUT: Mutex<InputPool> = { Mutex::new(InputPool::new()) };
 }
 

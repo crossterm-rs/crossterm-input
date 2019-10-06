@@ -1,7 +1,7 @@
 use crate::rewrite::{EventIterator, InputEventConsumer, IntoEventIterator};
 use crate::{InputEvent, KeyEvent, MouseEvent};
 
-/// An input stream of key events, that have had occurred.
+/// An input stream that can be used to read occurred key events.
 pub struct InputStream {
     channel_reader: InputEventConsumer,
     input_cache: Vec<InputEvent>,
@@ -49,7 +49,6 @@ impl<'a> InputStream {
         &mut self,
         mut filter: impl FnMut(&InputEvent) -> Option<T>,
     ) -> Vec<T> {
-        println!("draining");
         // TODO: nightly: `Vec::drain_filter`
         let mut drained = Vec::with_capacity(self.input_cache.len());
         let mut i = 0;
@@ -72,8 +71,6 @@ impl<'a> InputStream {
 
 #[cfg(test)]
 mod tests {
-    use crossbeam::unbounded;
-
     use crate::rewrite::input_stream::InputStream;
     use crate::{InputEvent, KeyEvent, MouseEvent};
 
