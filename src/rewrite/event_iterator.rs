@@ -8,7 +8,7 @@ pub struct EventIterator<E> {
 
 impl<E> EventIterator<E> {
     /// Returns an `EventIterator` from the given `iterator`.
-    pub fn from_iter<T: IntoIterator<Item = E>>(iter: T) -> EventIterator<E> {
+    pub(crate) fn from_iter<T: IntoIterator<Item = E>>(iter: T) -> EventIterator<E> {
         EventIterator {
             events: VecDeque::from_iter(iter),
         }

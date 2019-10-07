@@ -26,7 +26,7 @@ pub struct InputPool {
 }
 
 impl InputPool {
-    fn new() -> InputPool {
+    pub(crate) fn new() -> InputPool {
         #[cfg(windows)]
         let input = WinApiInputSource::new();
         #[cfg(unix)]
@@ -44,7 +44,7 @@ impl InputPool {
     }
 
     /// Changes the default input source to the given input source.
-    pub fn set_input_source(&mut self, input_source: Box<InputSource>) {
+    pub fn set_input_source(&mut self, input_source: Box<dyn InputSource>) {
         self.input_source = input_source;
     }
 

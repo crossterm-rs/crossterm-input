@@ -31,7 +31,7 @@ impl<'b> InputEventChannel {
 }
 
 /// The consumer that consumers input events from the producer.
-pub struct InputEventConsumer {
+pub(crate) struct InputEventConsumer {
     // TODO: I could't find a way to store the Reader Lock here instead of the whole channel.
     event_channel: Arc<RwLock<EventChannel<InputEvent>>>,
     read_id: ReaderId<InputEvent>,
@@ -58,13 +58,13 @@ pub(crate) struct ProducerLock<'a> {
 }
 
 impl<'a> ProducerLock<'a> {
-    pub fn from_lock_result(
+    pub(crate) fn from_lock_result(
         lock_result: LockResult<RwLockWriteGuard<'a, EventChannel<InputEvent>>>,
     ) -> ProducerLock<'a> {
         ProducerLock { lock_result }
     }
 
-    pub fn produce_input_event(&mut self, input_event: InputEvent) {
+    pub(crate) fn produce_input_event(&mut self, input_event: InputEvent) {
         self.lock_result
             .as_mut()
             .expect("can not aquire write lock")

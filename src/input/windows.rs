@@ -341,7 +341,7 @@ pub fn read_single_event() -> Result<Option<InputEvent>> {
 
     let input = match console.read_single_input_event() {
         Ok(event) => event,
-        Err(e) => return Ok(None),
+        Err(_e) => return Ok(None),
     };
 
     match input.event_type {
