@@ -339,9 +339,9 @@ extern "C" {
 pub fn read_single_event() -> Result<Option<InputEvent>> {
     let console = Console::from(Handle::current_in_handle()?);
 
-    let input = match console.read_single_input_event()? {
-        Some(event) => event,
-        None => return Ok(None),
+    let input = match console.read_single_input_event() {
+        Ok(event) => event,
+        Err(e) => return Ok(None),
     };
 
     match input.event_type {

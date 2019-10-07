@@ -1,5 +1,5 @@
 use crate::rewrite::input_stream::InputStream;
-use crate::rewrite::{InputEventChannel, InputSource};
+use crate::rewrite::InputSource;
 use crossterm_utils::Result;
 use lazy_static::lazy_static;
 
@@ -8,6 +8,7 @@ use crate::rewrite::TTYInputSource;
 #[cfg(windows)]
 use crate::rewrite::WinApiInputSource;
 
+use crate::rewrite::spmc::InputEventChannel;
 use shrev::EventChannel;
 use std::sync::{LockResult, Mutex, MutexGuard};
 
@@ -33,7 +34,7 @@ impl InputPool {
 
         InputPool {
             input_source: Box::new(input) as Box<dyn InputSource + Sync + Send>,
-            event_channel: InputEventChannel::new(EventChannel::new()),
+            event_channel: InputEventChannel::channel(EventChannel::new()),
         }
     }
 

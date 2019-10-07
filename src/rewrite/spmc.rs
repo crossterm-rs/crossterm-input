@@ -3,20 +3,20 @@ use shrev::{self, EventChannel, ReaderId};
 use std::sync::{Arc, LockResult, RwLock, RwLockWriteGuard};
 
 /// Single producer multiple consumers channel (SPMC) for input sharing.
-pub struct InputEventChannel {
+pub(crate) struct InputEventChannel {
     event_channel: Arc<RwLock<EventChannel<InputEvent>>>,
 }
 
 impl<'b> InputEventChannel {
-    /// Constructs a new `InputEventChannel`.
-    pub fn new(event_channel: EventChannel<InputEvent>) -> InputEventChannel {
+    /// Constructs a new spmc `InputEventChannel`.
+    pub(crate) fn channel(event_channel: EventChannel<InputEvent>) -> InputEventChannel {
         InputEventChannel {
             event_channel: Arc::new(RwLock::new(event_channel)),
         }
     }
 
     /// Constructs a new consumer for consuming input events.
-    pub fn new_consumer(&self) -> InputEventConsumer {
+    pub(crate) fn new_consumer(&self) -> InputEventConsumer {
         InputEventConsumer {
             read_id: self.event_channel.write().unwrap().register_reader(),
             event_channel: self.event_channel.clone(),
@@ -24,7 +24,7 @@ impl<'b> InputEventChannel {
     }
 
     /// Tries to acquire the producer that can sent input events to the consumers.
-    pub fn producer<'a>(&mut self) -> ProducerLock<'_> {
+    pub(crate) fn producer<'a>(&mut self) -> ProducerLock<'_> {
         let a = self.event_channel.write();
         ProducerLock::from_lock_result(a)
     }
@@ -52,7 +52,8 @@ impl InputEventConsumer {
     }
 }
 
-pub struct ProducerLock<'a> {
+/// An acquired write lock to the event channel producer.
+pub(crate) struct ProducerLock<'a> {
     lock_result: LockResult<RwLockWriteGuard<'a, EventChannel<InputEvent>>>,
 }
 

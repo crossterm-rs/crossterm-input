@@ -8,7 +8,6 @@ pub use self::{
     event_iterator::{EventIterator, IntoEventIterator},
     input_source::InputSource,
     input_stream::InputStream,
-    spmc::{InputEventChannel, InputEventConsumer},
 };
 
 #[cfg(unix)]
