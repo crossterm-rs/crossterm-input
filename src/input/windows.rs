@@ -539,8 +539,9 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<crate::MouseEvent> {
     // mimicks the behavior; additionally, in xterm, mouse move is only handled when a
     // mouse button is held down (ie. mouse drag)
 
-    let xpos = event.mouse_position.x + 1;
-    let ypos = event.mouse_position.y + 1;
+    // Windows returns (0, 0) for upper/left
+    let xpos = event.mouse_position.x;
+    let ypos = event.mouse_position.y;
 
     // TODO (@imdaveho): check if linux only provides coords for visible terminal window vs the total buffer
 
