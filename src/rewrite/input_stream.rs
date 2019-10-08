@@ -73,32 +73,68 @@ impl<'a> InputStream {
 #[cfg(test)]
 mod tests {
     use crate::rewrite::input_stream::InputStream;
+    use crate::rewrite::spmc::InputEventConsumer;
     use crate::{InputEvent, KeyEvent, MouseEvent};
+    use shrev::EventChannel;
+    use std::sync::{Arc, RwLock};
 
     #[test]
-    pub fn test_receive_key_events() {
-        let (tx, rx) = unbounded();
+    pub fn test_consumer_consumes_channel_key_events() {
+        let (channel, consumer) = event_consumer();
 
-        let mut input_stream = InputStream::new(rx);
+        let mut input_stream = InputStream::new(consumer);
 
-        tx.send(InputEvent::Keyboard(KeyEvent::Tab));
+        channel
+            .write()
+            .unwrap()
+            .single_write(InputEvent::Keyboard(KeyEvent::Tab));
 
         assert_eq!(input_stream.key_events().next(), Some(KeyEvent::Tab));
     }
 
     #[test]
-    pub fn test_receive_mouse_events() {
-        let (tx, rx) = unbounded();
+    pub fn test_consumer_consumes_channel_mouse_events() {
+        let (channel, consumer) = event_consumer();
 
-        let mut input_stream = InputStream::new(rx);
+        let mut input_stream = InputStream::new(consumer);
 
-        tx.send(InputEvent::Mouse(MouseEvent::Unknown));
+        // produce event
+        channel
+            .write()
+            .unwrap()
+            .single_write(InputEvent::Mouse(MouseEvent::Unknown));
 
+        // consume events
         assert_eq!(
             input_stream.mouse_events().next(),
             Some(MouseEvent::Unknown)
         );
         assert_eq!(input_stream.key_events().next(), None);
         assert_eq!(input_stream.events().next(), None);
+    }
+
+    #[test]
+    pub fn test_consumer_consumes_channel_input_events() {
+        let (channel, consumer) = event_consumer();
+
+        let mut input_stream = InputStream::new(consumer);
+
+        // produce events
+        channel.write().unwrap().single_write(InputEvent::Unknown);
+        channel
+            .write()
+            .unwrap()
+            .single_write(InputEvent::Unsupported(vec![]));
+
+        // consume events
+        let mut event_iterator = input_stream.events();
+
+        assert_eq!(event_iterator.next(), Some(InputEvent::Unknown));
+        assert_eq!(event_iterator.next(), Some(InputEvent::Unsupported(vec![])));
+    }
+
+    fn event_consumer() -> (Arc<RwLock<EventChannel<InputEvent>>>, InputEventConsumer) {
+        let mut channel = Arc::new(RwLock::new(EventChannel::new()));
+        (channel.clone(), InputEventConsumer::new(channel))
     }
 }

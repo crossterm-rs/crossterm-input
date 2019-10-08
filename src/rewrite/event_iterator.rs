@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::iter::FromIterator;
 
 /// An iterator over occurred input `E`.
+#[derive(Debug)]
 pub struct EventIterator<E> {
     events: VecDeque<E>,
 }
@@ -20,7 +21,7 @@ impl<E> Iterator for EventIterator<E> {
 
     /// Returns the next input event.
     fn next(&mut self) -> Option<Self::Item> {
-        self.events.pop_back()
+        self.events.pop_front()
     }
 }
 

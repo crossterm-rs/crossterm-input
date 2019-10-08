@@ -82,7 +82,7 @@ mod tests {
     use std::sync::mpsc::channel;
 
     #[test]
-    pub fn test_input_pool() {
+    pub fn test_read_input_multiple_consumers() {
         let mut input_pool = InputPool::lock().unwrap();
 
         // sender can be used to send fake data, receiver is used to provide the fake input source with input events.

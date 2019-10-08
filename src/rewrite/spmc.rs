@@ -17,10 +17,7 @@ impl<'b> InputEventChannel {
 
     /// Constructs a new consumer for consuming input events.
     pub(crate) fn new_consumer(&self) -> InputEventConsumer {
-        InputEventConsumer {
-            read_id: self.event_channel.write().unwrap().register_reader(),
-            event_channel: self.event_channel.clone(),
-        }
+        InputEventConsumer::new(self.event_channel.clone())
     }
 
     /// Tries to acquire the producer that can sent input events to the consumers.
@@ -38,8 +35,15 @@ pub(crate) struct InputEventConsumer {
 }
 
 impl InputEventConsumer {
+    pub(crate) fn new(event_channel: Arc<RwLock<EventChannel<InputEvent>>>) -> InputEventConsumer {
+        InputEventConsumer {
+            read_id: event_channel.write().unwrap().register_reader(),
+            event_channel: event_channel.clone(),
+        }
+    }
+
     /// Returns all available input events for this consumer.
-    pub fn read_all(&mut self) -> Vec<InputEvent> {
+    pub(crate) fn read_all(&mut self) -> Vec<InputEvent> {
         let lock = self
             .event_channel
             .read()
@@ -69,5 +73,37 @@ impl<'a> ProducerLock<'a> {
             .as_mut()
             .expect("can not aquire write lock")
             .single_write(input_event);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::rewrite::input_stream::InputStream;
+    use crate::rewrite::spmc::InputEventConsumer;
+    use crate::{InputEvent, KeyEvent, MouseEvent};
+    use shrev::EventChannel;
+    use std::sync::{Arc, RwLock};
+
+    #[test]
+    pub fn test_read_all_events() {
+        let (channel, mut consumer) = event_consumer();
+
+        let input_events = vec![
+            InputEvent::Unsupported(vec![]),
+            InputEvent::Unknown,
+            InputEvent::Mouse(MouseEvent::Unknown),
+            InputEvent::Keyboard(KeyEvent::Up),
+        ];
+
+        for event in input_events.iter() {
+            channel.write().unwrap().single_write(event.clone());
+        }
+
+        assert_eq!(consumer.read_all(), input_events);
+    }
+
+    fn event_consumer() -> (Arc<RwLock<EventChannel<InputEvent>>>, InputEventConsumer) {
+        let mut channel = Arc::new(RwLock::new(EventChannel::new()));
+        (channel.clone(), InputEventConsumer::new(channel))
     }
 }
