@@ -13,7 +13,7 @@ edition = "2018"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version =  "0.3.8", features = ["winnt", "winuser"] }
-crossterm_winapi = { version = "0.2.1" }
+crossterm_winapi = { git = "https://github.com/crossterm-rs/crossterm-winapi.git", branch = "master", version = "0.2.1" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.51"
