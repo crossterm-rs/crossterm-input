@@ -37,8 +37,6 @@
 //! on the terminal screen. See the
 //! [`crossterm_screen`](https://docs.rs/crossterm_screen/) crate documentation to learn more.
 
-use std::io;
-
 #[doc(no_inline)]
 pub use crossterm_screen::{IntoRawMode, RawScreen};
 #[doc(no_inline)]
@@ -70,6 +68,15 @@ pub enum InputEvent {
     Unsupported(Vec<u8>), // TODO Not used, should be removed.
     /// An unknown event.
     Unknown,
+    /// For INTERNAL use only, will be removed!
+    Internal(InternalEvent),
+}
+
+/// For INTERNAL use only, will be removed!
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, PartialOrd, PartialEq, Hash, Clone)]
+pub enum InternalEvent {
+    CursorPosition(u16, u16),
 }
 
 /// Represents a mouse event.
@@ -242,11 +249,7 @@ impl TerminalInput {
     /// }
     /// ```
     pub fn read_line(&self) -> Result<String> {
-        let mut rv = String::new();
-        io::stdin().read_line(&mut rv)?;
-        let len = rv.trim_end_matches(&['\r', '\n'][..]).len();
-        rv.truncate(len);
-        Ok(rv)
+        self.input.read_line()
     }
 
     /// Reads one character from the user input.
