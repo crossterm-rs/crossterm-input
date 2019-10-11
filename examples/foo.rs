@@ -1,11 +1,17 @@
+// TEMPORARY IN THIS PR - IT WONT BE PART OF THE FINAL PR
+
 #![allow(dead_code)]
 use std::io::{stdout, Write};
 
-use crossterm_input::{
-    InputEvent, InternalEvent, KeyEvent, MouseEvent, RawScreen, Result, TerminalInput,
-};
+use crossterm_input::{InputEvent, KeyEvent, MouseEvent, RawScreen, Result, TerminalInput};
 
-// Sample implementation for crossterm_cursor & pos_raw
+//
+// This is sample `crossterm_cursor::pos_raw` implementation we will have to use.
+//
+// Once the crates will be merged, `pos_raw` will gain access to `internal_event_receiver()`
+// function and thus we can drop `InputEvent::CursorPosition` and use `InternalEvent::CursorPosition`
+// to hide this implementation detail from the user.
+//
 fn pos_raw() -> Result<(u16, u16)> {
     let input = TerminalInput::new();
     let mut reader = input.read_sync();
@@ -16,7 +22,7 @@ fn pos_raw() -> Result<(u16, u16)> {
     stdout.flush()?;
 
     loop {
-        if let Some(InputEvent::Internal(InternalEvent::CursorPosition(x, y))) = reader.next() {
+        if let Some(InputEvent::CursorPosition(x, y)) = reader.next() {
             return Ok((x, y));
         }
     }
@@ -43,7 +49,7 @@ fn async_test() -> Result<()> {
                         _ => {}
                     };
                 }
-                InputEvent::Internal(_) => {}
+                InputEvent::CursorPosition(_, _) => {}
                 e => {
                     println!("Event: {:?}", e);
                 }
@@ -76,7 +82,7 @@ fn sync_test() -> Result<()> {
                         _ => {}
                     };
                 }
-                InputEvent::Internal(_) => {}
+                InputEvent::CursorPosition(_, _) => {}
                 e => {
                     println!("Event: {:?}", e);
                 }

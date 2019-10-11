@@ -1,11 +1,12 @@
 //! This is a UNIX specific implementation for input related action.
 
+use std::sync::mpsc::Receiver;
 use std::{char, sync::mpsc};
 
 use crossterm_utils::{csi, write_cout, Result};
 
-use crate::sys::unix::event_receiver;
-use crate::{input::Input, InputEvent, KeyEvent};
+use crate::sys::unix::internal_event_receiver;
+use crate::{input::Input, InputEvent, InternalEvent, KeyEvent};
 
 pub(crate) struct UnixInput;
 
@@ -126,7 +127,7 @@ impl Input for UnixInput {
 /// } // `reader` dropped <- thread cleaned up, `_raw` dropped <- raw mode disabled
 /// ```
 pub struct AsyncReader {
-    rx: Option<mpsc::Receiver<InputEvent>>,
+    rx: Option<Receiver<InternalEvent>>,
     sentinel: Option<InputEvent>,
 }
 
@@ -139,7 +140,7 @@ impl AsyncReader {
     /// * The reading thread is cleaned up when you drop the `AsyncReader`.
     fn new(sentinel: Option<InputEvent>) -> AsyncReader {
         AsyncReader {
-            rx: Some(event_receiver()),
+            rx: Some(internal_event_receiver()),
             sentinel,
         }
     }
@@ -165,20 +166,39 @@ impl Iterator for AsyncReader {
     /// `None` doesn't mean that the iteration is finished. See the
     /// [`AsyncReader`](struct.AsyncReader.html) documentation for more information.
     fn next(&mut self) -> Option<Self::Item> {
+        // TODO 1.0: This whole `InternalEvent` -> `InputEvent` mapping should be shared
+        //           between UNIX & Windows implementations
         if let Some(rx) = self.rx.take() {
-            let result = match rx.try_recv() {
-                Ok(x) => Some(x),
-                Err(mpsc::TryRecvError::Empty) => None,
-                // TODO 1.0: We should propagate errors here?
+            match rx.try_recv() {
+                Ok(internal_event) => {
+                    // Map `InternalEvent` to `InputEvent`
+                    match internal_event.into() {
+                        Some(input_event) => {
+                            // Did we reach sentinel?
+                            if !(self.sentinel.is_some()
+                                && self.sentinel.as_ref() == Some(&input_event))
+                            {
+                                // No sentinel reached, put the receiver back
+                                self.rx = Some(rx);
+                            }
+
+                            Some(input_event)
+                        }
+                        None => {
+                            // `InternalEvent` swallowed, put the receiver back for another events
+                            self.rx = Some(rx);
+                            None
+                        }
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    // No event, put the receiver back for another events
+                    self.rx = Some(rx);
+                    None
+                }
+                // Sender closed, drop the receiver (do not put it back)
                 Err(mpsc::TryRecvError::Disconnected) => None,
-            };
-
-            if !(self.sentinel.is_some() && self.sentinel == result) {
-                // No sentinel reached, put the receiver back
-                self.rx = Some(rx);
             }
-
-            result
         } else {
             None
         }
@@ -241,13 +261,13 @@ impl Iterator for AsyncReader {
 /// } // `_raw` dropped <- raw mode disabled
 /// ```
 pub struct SyncReader {
-    rx: mpsc::Receiver<InputEvent>,
+    rx: Option<Receiver<InternalEvent>>,
 }
 
 impl SyncReader {
     fn new() -> SyncReader {
         SyncReader {
-            rx: event_receiver(),
+            rx: Some(internal_event_receiver()),
         }
     }
 }
@@ -260,10 +280,24 @@ impl Iterator for SyncReader {
     /// `None` doesn't mean that the iteration is finished. See the
     /// [`SyncReader`](struct.SyncReader.html) documentation for more information.
     fn next(&mut self) -> Option<Self::Item> {
-        match self.rx.recv() {
-            Ok(x) => Some(x),
-            // TODO 1.0: We should propagate errors here?
-            Err(mpsc::RecvError) => None,
+        // TODO 1.0: This whole `InternalEvent` -> `InputEvent` mapping should be shared
+        //           between UNIX & Windows implementations
+        if let Some(rx) = self.rx.take() {
+            match rx.recv() {
+                Ok(internal_event) => {
+                    // We have an internal event, map it to `InputEvent`
+                    let event = internal_event.into();
+
+                    // Put the receiver back for more events
+                    self.rx = Some(rx);
+
+                    event
+                }
+                // Sender is closed, do not put receiver back
+                Err(mpsc::RecvError) => None,
+            }
+        } else {
+            None
         }
     }
 }

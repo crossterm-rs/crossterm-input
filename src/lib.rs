@@ -68,15 +68,10 @@ pub enum InputEvent {
     Unsupported(Vec<u8>), // TODO Not used, should be removed.
     /// An unknown event.
     Unknown,
-    /// For INTERNAL use only, will be removed!
-    Internal(InternalEvent),
-}
-
-/// For INTERNAL use only, will be removed!
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, PartialOrd, PartialEq, Hash, Clone)]
-pub enum InternalEvent {
-    CursorPosition(u16, u16),
+    /// Internal cursor position event. Don't use it, it will be removed in the
+    /// `crossterm` 1.0.
+    #[doc(hidden)]
+    CursorPosition(u16, u16), // TODO 1.0: Remove
 }
 
 /// Represents a mouse event.
@@ -177,6 +172,30 @@ pub enum KeyEvent {
     ShiftRight,
     /// Shift + left arrow key.
     ShiftLeft,
+}
+
+/// An internal event.
+///
+/// Encapsulates publicly available `InputEvent` with additional internal
+/// events that shouldn't be publicly available to the crate users.
+#[derive(Debug, PartialOrd, PartialEq, Hash, Clone)]
+pub(crate) enum InternalEvent {
+    /// An input event.
+    Input(InputEvent),
+    /// A cursor position (`x`, `y`).
+    CursorPosition(u16, u16),
+}
+
+/// Converts an `InternalEvent` into a possible `InputEvent`.
+impl From<InternalEvent> for Option<InputEvent> {
+    fn from(ie: InternalEvent) -> Self {
+        match ie {
+            InternalEvent::Input(input_event) => Some(input_event),
+            // TODO 1.0: Swallow `CursorPosition` and return `None`.
+            // `cursor::pos_raw()` will be able to use this module `internal_event_receiver()`
+            InternalEvent::CursorPosition(x, y) => Some(InputEvent::CursorPosition(x, y)),
+        }
+    }
 }
 
 /// A terminal input.

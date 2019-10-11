@@ -4,6 +4,7 @@ use std::sync::{
     mpsc::{self, Receiver, Sender},
     Arc, Mutex,
 };
+use std::time::Duration;
 use std::{fs, io, mem, thread};
 
 use crossterm_utils::{ErrorKind, Result};
@@ -12,18 +13,112 @@ use lazy_static::lazy_static;
 
 use crate::{InputEvent, InternalEvent, KeyEvent, MouseButton, MouseEvent};
 
-// TODO Replace this with something like std::io::lazy::Lazy
-lazy_static! {
-    static ref TTY_INSTANCE: Mutex<Tty> = Mutex::new(Tty::new());
+/// An internal event provider interface.
+pub(crate) trait InternalEventProvider: Send {
+    /// Pauses the provider.
+    ///
+    /// This method must be called when all the receivers were dropped.
+    fn pause(&mut self);
+
+    /// Creates a new `InternalEvent` receiver.
+    fn receiver(&mut self) -> Receiver<InternalEvent>;
 }
 
-//
-// stdin or /dev/tty wrapper
-//
-// It's a simple wrapper to select & read bytes. It's constructed by
-// the TtyReadingThread.
-//
+lazy_static! {
+    /// A shared internal event provider.
+    static ref INTERNAL_EVENT_PROVIDER: Mutex<Box<dyn InternalEventProvider>> =
+        Mutex::new(default_internal_event_provider());
+}
 
+/// Creates a new default internal event provider.
+fn default_internal_event_provider() -> Box<dyn InternalEventProvider> {
+    #[cfg(unix)]
+    Box::new(UnixInternalEventProvider::new())
+    // TODO 1.0: #[cfg(windows)]
+}
+
+/// A internal event senders wrapper.
+///
+/// The main purpose of this structure is to make the list of senders
+/// easily sharable (clone) & maintainable.
+#[derive(Clone)]
+struct UnixInternalEventChannels {
+    senders: Arc<Mutex<Vec<Sender<InternalEvent>>>>,
+}
+
+impl UnixInternalEventChannels {
+    /// Creates a new `UnixInternalEventChannels`.
+    fn new() -> UnixInternalEventChannels {
+        UnixInternalEventChannels {
+            senders: Arc::new(Mutex::new(vec![])),
+        }
+    }
+
+    /// Sends an `InternalEvent` to all available channels. Returns `false` if the
+    /// list of channels is empty.
+    ///
+    /// # Notes
+    ///
+    /// Channel is removed if the receiving end was dropped.
+    ///
+    fn send(&self, event: InternalEvent) -> bool {
+        let mut guard = self.senders.lock().unwrap();
+        guard.retain(|sender| sender.send(event.clone()).is_ok());
+
+        !guard.is_empty()
+    }
+
+    /// Creates a new `InternalEvent` receiver.
+    fn receiver(&self) -> Receiver<InternalEvent> {
+        let (tx, rx) = mpsc::channel();
+
+        let mut guard = self.senders.lock().unwrap();
+        guard.push(tx);
+
+        rx
+    }
+}
+
+/// An UNIX `InternalEventProvider` implementation.
+pub(crate) struct UnixInternalEventProvider {
+    /// A list of channels.
+    channels: UnixInternalEventChannels,
+    /// A reading thread.
+    reading_thread: Option<TtyReadingThread>,
+}
+
+impl UnixInternalEventProvider {
+    fn new() -> UnixInternalEventProvider {
+        UnixInternalEventProvider {
+            channels: UnixInternalEventChannels::new(),
+            reading_thread: None,
+        }
+    }
+}
+
+impl InternalEventProvider for UnixInternalEventProvider {
+    /// Shuts down the reading thread (if exists).
+    fn pause(&mut self) {
+        // Thread will shutdown on it's own once dropped.
+        self.reading_thread = None;
+    }
+
+    /// Creates a new `InternalEvent` receiver and spawns a new reading
+    /// thread (or reuses the existing one).
+    fn receiver(&mut self) -> Receiver<InternalEvent> {
+        let rx = self.channels.receiver();
+
+        if self.reading_thread.is_none() {
+            let reading_thread = TtyReadingThread::new(self.channels.clone());
+            self.reading_thread = Some(reading_thread);
+        }
+
+        rx
+    }
+}
+
+/// A simple standard input (or `/dev/tty`) wrapper for bytes reading or checking
+/// if there's an input available.
 struct TtyRaw {
     fd: Option<RawFd>,
 }
@@ -69,15 +164,14 @@ impl TtyRaw {
         }
     }
 
-    /// # Arguments
-    ///
-    /// * `timeout` - timeout in milliseconds.
-    fn select(&self, timeout: i32) -> Result<bool> {
+    /// Returns `true` if there's an input available within the given
+    /// `timeout`.
+    fn select(&self, timeout: Duration) -> Result<bool> {
         let fd = self.raw_fd()?;
 
         let mut timeout = libc::timeval {
-            tv_sec: 0,
-            tv_usec: (timeout * 1_000) as libc::suseconds_t,
+            tv_sec: timeout.as_secs() as libc::time_t,
+            tv_usec: timeout.subsec_micros() as libc::suseconds_t,
         };
 
         let sel = unsafe {
@@ -102,52 +196,26 @@ impl TtyRaw {
     }
 }
 
-//
-// Just a wrapper around list of Sender<InputEvent>.
-//
-// Cloneable, shareable, ...
-//
-
-#[derive(Clone)]
-struct EventChannels {
-    senders: Arc<Mutex<Vec<Sender<InputEvent>>>>,
-}
-
-impl EventChannels {
-    fn new() -> EventChannels {
-        EventChannels {
-            senders: Arc::new(Mutex::new(vec![])),
-        }
-    }
-
-    fn add_sender(&mut self, sender: Sender<InputEvent>) {
-        self.senders.lock().unwrap().push(sender);
-    }
-
-    fn send(&self, event: InputEvent) {
-        let mut guard = self.senders.lock().unwrap();
-        guard.retain(|sender| sender.send(event.clone()).is_ok());
-
-        // If there're no receivers, drop the reading thread
-        if guard.is_empty() {
-            TTY_INSTANCE.lock().unwrap().stop_reading_thread();
-        }
-    }
-}
-
-//
-// Actual reading thread implementation
-//
-// Once dropped, signals the thread to finish and joins the handle to wait.
-//
-
+/// A stdin (or /dev/tty) reading thread.
+///
+/// The reading thread will shutdown on it's own once you drop the
+/// `TtyReadingThread`.
 struct TtyReadingThread {
+    /// A signal to shutdown the thread.
+    ///
+    /// If `load(Ordering::SeqCst)` returns `true`, the thread must exit.
     shutdown: Arc<AtomicBool>,
+    /// A reading thread join handle (if exists).
     handle: Option<thread::JoinHandle<()>>,
 }
 
 impl TtyReadingThread {
-    fn new(channels: EventChannels) -> TtyReadingThread {
+    /// Creates a new `TtyReadingThread`.
+    ///
+    /// # Arguments
+    ///
+    /// * `channels` - a list of channels to send all `InternalEvent`s to.
+    fn new(channels: UnixInternalEventChannels) -> TtyReadingThread {
         let shutdown = Arc::new(AtomicBool::new(false));
 
         let shutdown_signal = shutdown.clone();
@@ -159,11 +227,11 @@ impl TtyReadingThread {
 
             // TODO We should use better approach for signalling to avoid unnecessary looping
             loop {
-                if let Ok(true) = tty_raw.select(100) {
+                if let Ok(true) = tty_raw.select(Duration::from_millis(100)) {
                     if let Ok(byte) = tty_raw.read() {
                         buffer.push(byte);
 
-                        let input_available = match tty_raw.select(0) {
+                        let input_available = match tty_raw.select(Duration::from_secs(0)) {
                             Ok(input_available) => input_available,
                             Err(_) => {
                                 // select() failed, assume false and continue
@@ -177,7 +245,11 @@ impl TtyReadingThread {
                             // Clear the input buffer and send the event
                             Ok(Some(event)) => {
                                 buffer.clear();
-                                channels.send(event);
+
+                                if !channels.send(event) {
+                                    // TODO This is pretty ugly. Thread should be stopped from outside.
+                                    INTERNAL_EVENT_PROVIDER.lock().unwrap().pause();
+                                }
                             }
                             // Malformed sequence, clear the buffer
                             Err(_) => buffer.clear(),
@@ -203,52 +275,14 @@ impl Drop for TtyReadingThread {
         // Signal the thread to shutdown
         self.shutdown.store(true, Ordering::SeqCst);
 
-        // TODO Handle error (panicked thread) properly here
-        // Wait for the thread
+        // Wait for the thread shutdown
         let handle = self.handle.take().unwrap();
         handle.join().unwrap();
     }
 }
 
-//
-// Tty stored in the TTY_INSTANCE, no one should instantiate it directly
-//
-
-struct Tty {
-    channels: EventChannels,
-    reading_thread: Option<TtyReadingThread>,
-}
-
-impl Tty {
-    fn new() -> Tty {
-        Tty {
-            channels: EventChannels::new(),
-            reading_thread: None,
-        }
-    }
-
-    fn add_sender(&mut self, sender: Sender<InputEvent>) {
-        self.channels.add_sender(sender);
-        self.ensure_reading_thread_exists();
-    }
-
-    fn stop_reading_thread(&mut self) {
-        self.reading_thread = None;
-    }
-
-    fn ensure_reading_thread_exists(&mut self) {
-        if self.reading_thread.is_some() {
-            return;
-        }
-
-        self.reading_thread = Some(TtyReadingThread::new(self.channels.clone()));
-    }
-}
-
-pub(crate) fn event_receiver() -> Receiver<InputEvent> {
-    let (tx, rx) = mpsc::channel();
-    TTY_INSTANCE.lock().unwrap().add_sender(tx);
-    rx
+pub(crate) fn internal_event_receiver() -> Receiver<InternalEvent> {
+    INTERNAL_EVENT_PROVIDER.lock().unwrap().receiver()
 }
 
 //
@@ -271,7 +305,7 @@ fn could_not_parse_event_error() -> ErrorKind {
     ))
 }
 
-fn parse_event(buffer: &[u8], input_available: bool) -> Result<Option<InputEvent>> {
+fn parse_event(buffer: &[u8], input_available: bool) -> Result<Option<InternalEvent>> {
     if buffer.is_empty() {
         return Ok(None);
     }
@@ -283,7 +317,9 @@ fn parse_event(buffer: &[u8], input_available: bool) -> Result<Option<InputEvent
                     // Possible Esc sequence
                     Ok(None)
                 } else {
-                    Ok(Some(InputEvent::Keyboard(KeyEvent::Esc)))
+                    Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+                        KeyEvent::Esc,
+                    ))))
                 }
             } else {
                 match buffer[1] {
@@ -293,35 +329,45 @@ fn parse_event(buffer: &[u8], input_available: bool) -> Result<Option<InputEvent
                         } else {
                             match buffer[3] {
                                 // F1-F4
-                                val @ b'P'..=b'S' => {
-                                    Ok(Some(InputEvent::Keyboard(KeyEvent::F(1 + val - b'P'))))
-                                }
+                                val @ b'P'..=b'S' => Ok(Some(InternalEvent::Input(
+                                    InputEvent::Keyboard(KeyEvent::F(1 + val - b'P')),
+                                ))),
                                 _ => Err(could_not_parse_event_error()),
                             }
                         }
                     }
                     b'[' => parse_csi(&buffer[2..]),
-                    b'\x1B' => Ok(Some(InputEvent::Keyboard(KeyEvent::Esc))),
+                    b'\x1B' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+                        KeyEvent::Esc,
+                    )))),
                     _ => parse_utf8_char(buffer),
                 }
             }
         }
-        b'\r' | b'\n' => Ok(Some(InputEvent::Keyboard(KeyEvent::Enter))),
-        b'\t' => Ok(Some(InputEvent::Keyboard(KeyEvent::Tab))),
-        b'\x7F' => Ok(Some(InputEvent::Keyboard(KeyEvent::Backspace))),
-        c @ b'\x01'..=b'\x1A' => Ok(Some(InputEvent::Keyboard(KeyEvent::Ctrl(
-            (c as u8 - 0x1 + b'a') as char,
+        b'\r' | b'\n' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+            KeyEvent::Enter,
         )))),
-        c @ b'\x1C'..=b'\x1F' => Ok(Some(InputEvent::Keyboard(KeyEvent::Ctrl(
-            (c as u8 - 0x1C + b'4') as char,
+        b'\t' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+            KeyEvent::Tab,
         )))),
-        b'\0' => Ok(Some(InputEvent::Keyboard(KeyEvent::Null))),
+        b'\x7F' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+            KeyEvent::Backspace,
+        )))),
+        c @ b'\x01'..=b'\x1A' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+            KeyEvent::Ctrl((c as u8 - 0x1 + b'a') as char),
+        )))),
+        c @ b'\x1C'..=b'\x1F' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+            KeyEvent::Ctrl((c as u8 - 0x1C + b'4') as char),
+        )))),
+        b'\0' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+            KeyEvent::Null,
+        )))),
         _ => parse_utf8_char(buffer),
     }
 }
 
 // Buffer does NOT contain first two bytes: ESC [
-fn parse_csi(buffer: &[u8]) -> Result<Option<InputEvent>> {
+fn parse_csi(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     if buffer.is_empty() {
         return Ok(None);
     }
@@ -334,20 +380,34 @@ fn parse_csi(buffer: &[u8]) -> Result<Option<InputEvent>> {
                 match buffer[1] {
                     // NOTE (@imdaveho): cannot find when this occurs;
                     // having another '[' after ESC[ not a likely scenario
-                    val @ b'A'..=b'E' => {
-                        Ok(Some(InputEvent::Keyboard(KeyEvent::F(1 + val - b'A'))))
-                    }
-                    _ => Ok(Some(InputEvent::Unknown)),
+                    val @ b'A'..=b'E' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+                        KeyEvent::F(1 + val - b'A'),
+                    )))),
+                    _ => Ok(Some(InternalEvent::Input(InputEvent::Unknown))),
                 }
             }
         }
-        b'D' => Ok(Some(InputEvent::Keyboard(KeyEvent::Left))),
-        b'C' => Ok(Some(InputEvent::Keyboard(KeyEvent::Right))),
-        b'A' => Ok(Some(InputEvent::Keyboard(KeyEvent::Up))),
-        b'B' => Ok(Some(InputEvent::Keyboard(KeyEvent::Down))),
-        b'H' => Ok(Some(InputEvent::Keyboard(KeyEvent::Home))),
-        b'F' => Ok(Some(InputEvent::Keyboard(KeyEvent::End))),
-        b'Z' => Ok(Some(InputEvent::Keyboard(KeyEvent::BackTab))),
+        b'D' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+            KeyEvent::Left,
+        )))),
+        b'C' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+            KeyEvent::Right,
+        )))),
+        b'A' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+            KeyEvent::Up,
+        )))),
+        b'B' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+            KeyEvent::Down,
+        )))),
+        b'H' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+            KeyEvent::Home,
+        )))),
+        b'F' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+            KeyEvent::End,
+        )))),
+        b'Z' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+            KeyEvent::BackTab,
+        )))),
         b'M' => parse_csi_x10_mouse(&buffer[1..]),
         b'<' => parse_csi_xterm_mouse(&buffer[1..]),
         b'0'..=b'9' => {
@@ -370,34 +430,12 @@ fn parse_csi(buffer: &[u8]) -> Result<Option<InputEvent>> {
                 }
             }
         }
-        _ => Ok(Some(InputEvent::Unknown)),
+        _ => Ok(Some(InternalEvent::Input(InputEvent::Unknown))),
     }
 }
 
-//
-// This is the reason why I described something like
-// `AsyncReader` & `InternalAsyncReader`. Where `InternalAsyncReader` can
-// produce `InternalEvent` like ...
-//
-// enum InternalEvent {
-//    InputEvent(InputEvent),
-//    CursorPosition(u16, u16),
-//    ...
-// }
-//
-// ... and ...
-//
-// `AsyncReader` can iterate over `InternalAsyncReader` and swallow everything
-// except `InputEvent`.
-//
-// For now, there's InputEvent::CursorPosition variant, because I wanted to maintain
-// API compatibility as much as possible. But this shouldn't be visible by the user.
-// Also because we've separate crates, we have to make it publicly available so the
-// crossterm_cursor can access it.
-//
-
 // Buffer does NOT contain: ESC [
-fn parse_csi_cursor_position(buffer: &[u8]) -> Result<Option<InputEvent>> {
+fn parse_csi_cursor_position(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     let s = std::str::from_utf8(&buffer[..buffer.len() - 1])
         .map_err(|_| could_not_parse_event_error())?;
 
@@ -414,13 +452,11 @@ fn parse_csi_cursor_position(buffer: &[u8]) -> Result<Option<InputEvent>> {
     let y = next_u16()? - 1;
     let x = next_u16()? - 1;
 
-    Ok(Some(InputEvent::Internal(InternalEvent::CursorPosition(
-        x, y,
-    ))))
+    Ok(Some(InternalEvent::CursorPosition(x, y)))
 }
 
 // Buffer does NOT contain: ESC [
-fn parse_csi_modifier_key_code(buffer: &[u8]) -> Result<Option<InputEvent>> {
+fn parse_csi_modifier_key_code(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     let modifier = buffer[buffer.len() - 2];
     let key = buffer[buffer.len() - 1];
 
@@ -436,11 +472,11 @@ fn parse_csi_modifier_key_code(buffer: &[u8]) -> Result<Option<InputEvent>> {
         _ => InputEvent::Unknown,
     };
 
-    Ok(Some(event))
+    Ok(Some(InternalEvent::Input(event)))
 }
 
 // Buffer does NOT contain: ESC [
-fn parse_csi_special_key_code(buffer: &[u8]) -> Result<Option<InputEvent>> {
+fn parse_csi_special_key_code(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     let s = std::str::from_utf8(&buffer[..buffer.len() - 1])
         .map_err(|_| could_not_parse_event_error())?;
     let mut split = s.split(';');
@@ -458,7 +494,7 @@ fn parse_csi_special_key_code(buffer: &[u8]) -> Result<Option<InputEvent>> {
 
     if next_u8().is_ok() {
         // TODO: handle multiple values for key modifiers (ex: values [3, 2] means Shift+Delete)
-        return Ok(Some(InputEvent::Unknown));
+        return Ok(Some(InternalEvent::Input(InputEvent::Unknown)));
     }
 
     let event = match first {
@@ -474,11 +510,11 @@ fn parse_csi_special_key_code(buffer: &[u8]) -> Result<Option<InputEvent>> {
         _ => InputEvent::Unknown,
     };
 
-    Ok(Some(event))
+    Ok(Some(InternalEvent::Input(event)))
 }
 
 // Buffer does NOT contain: ESC [
-fn parse_csi_rxvt_mouse(buffer: &[u8]) -> Result<Option<InputEvent>> {
+fn parse_csi_rxvt_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     // rxvt mouse encoding:
     // ESC [ Cb ; Cx ; Cy ; M
 
@@ -508,11 +544,11 @@ fn parse_csi_rxvt_mouse(buffer: &[u8]) -> Result<Option<InputEvent>> {
         _ => MouseEvent::Unknown,
     };
 
-    Ok(Some(InputEvent::Mouse(event)))
+    Ok(Some(InternalEvent::Input(InputEvent::Mouse(event))))
 }
 
 // Buffer does NOT contain: ESC [ M
-fn parse_csi_x10_mouse(buffer: &[u8]) -> Result<Option<InputEvent>> {
+fn parse_csi_x10_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     // X10 emulation mouse encoding: ESC [ M CB Cx Cy (6 characters only).
     // NOTE (@imdaveho): cannot find documentation on this
 
@@ -527,29 +563,31 @@ fn parse_csi_x10_mouse(buffer: &[u8]) -> Result<Option<InputEvent>> {
     let cx = buffer[2].saturating_sub(32) as u16 - 1;
     let cy = buffer[3].saturating_sub(32) as u16 - 1;
 
-    Ok(Some(InputEvent::Mouse(match cb & 0b11 {
-        0 => {
-            if cb & 0x40 != 0 {
-                MouseEvent::Press(MouseButton::WheelUp, cx, cy)
-            } else {
-                MouseEvent::Press(MouseButton::Left, cx, cy)
+    Ok(Some(InternalEvent::Input(InputEvent::Mouse(
+        match cb & 0b11 {
+            0 => {
+                if cb & 0x40 != 0 {
+                    MouseEvent::Press(MouseButton::WheelUp, cx, cy)
+                } else {
+                    MouseEvent::Press(MouseButton::Left, cx, cy)
+                }
             }
-        }
-        1 => {
-            if cb & 0x40 != 0 {
-                MouseEvent::Press(MouseButton::WheelDown, cx, cy)
-            } else {
-                MouseEvent::Press(MouseButton::Middle, cx, cy)
+            1 => {
+                if cb & 0x40 != 0 {
+                    MouseEvent::Press(MouseButton::WheelDown, cx, cy)
+                } else {
+                    MouseEvent::Press(MouseButton::Middle, cx, cy)
+                }
             }
-        }
-        2 => MouseEvent::Press(MouseButton::Right, cx, cy),
-        3 => MouseEvent::Release(cx, cy),
-        _ => MouseEvent::Unknown,
-    })))
+            2 => MouseEvent::Press(MouseButton::Right, cx, cy),
+            3 => MouseEvent::Release(cx, cy),
+            _ => MouseEvent::Unknown,
+        },
+    ))))
 }
 
 // Buffer does NOT contain: ESC [ <
-fn parse_csi_xterm_mouse(buffer: &[u8]) -> Result<Option<InputEvent>> {
+fn parse_csi_xterm_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     // xterm mouse handling:
     // ESC [ < Cb ; Cx ; Cy (;) (M or m)
 
@@ -588,24 +626,32 @@ fn parse_csi_xterm_mouse(buffer: &[u8]) -> Result<Option<InputEvent>> {
                 _ => unreachable!(),
             };
             match buffer.last().unwrap() {
-                b'M' => Ok(Some(InputEvent::Mouse(MouseEvent::Press(button, cx, cy)))),
-                b'm' => Ok(Some(InputEvent::Mouse(MouseEvent::Release(cx, cy)))),
-                _ => Ok(Some(InputEvent::Unknown)),
+                b'M' => Ok(Some(InternalEvent::Input(InputEvent::Mouse(
+                    MouseEvent::Press(button, cx, cy),
+                )))),
+                b'm' => Ok(Some(InternalEvent::Input(InputEvent::Mouse(
+                    MouseEvent::Release(cx, cy),
+                )))),
+                _ => Ok(Some(InternalEvent::Input(InputEvent::Unknown))),
             }
         }
-        32 => Ok(Some(InputEvent::Mouse(MouseEvent::Hold(cx, cy)))),
-        3 => Ok(Some(InputEvent::Mouse(MouseEvent::Release(cx, cy)))),
-        _ => Ok(Some(InputEvent::Unknown)),
+        32 => Ok(Some(InternalEvent::Input(InputEvent::Mouse(
+            MouseEvent::Hold(cx, cy),
+        )))),
+        3 => Ok(Some(InternalEvent::Input(InputEvent::Mouse(
+            MouseEvent::Release(cx, cy),
+        )))),
+        _ => Ok(Some(InternalEvent::Input(InputEvent::Unknown))),
     }
 }
 
-fn parse_utf8_char(buffer: &[u8]) -> Result<Option<InputEvent>> {
+fn parse_utf8_char(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     match std::str::from_utf8(buffer) {
-        Ok(s) => Ok(Some(InputEvent::Keyboard(KeyEvent::Char(
-            match s.chars().next() {
+        Ok(s) => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
+            KeyEvent::Char(match s.chars().next() {
                 Some(ch) => ch,
                 None => return Err(could_not_parse_event_error()),
-            },
+            }),
         )))),
         Err(_) if buffer.len() < 4 => Ok(None),
         _ => Err(could_not_parse_event_error()),
