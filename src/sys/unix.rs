@@ -372,66 +372,62 @@ fn parse_csi(buffer: &[u8]) -> Result<Option<InternalEvent>> {
         return Ok(None);
     }
 
-    match buffer[0] {
+    let input_event = match buffer[0] {
         b'[' => {
             if buffer.len() == 1 {
-                Ok(None)
+                None
             } else {
                 match buffer[1] {
                     // NOTE (@imdaveho): cannot find when this occurs;
                     // having another '[' after ESC[ not a likely scenario
-                    val @ b'A'..=b'E' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
-                        KeyEvent::F(1 + val - b'A'),
-                    )))),
-                    _ => Ok(Some(InternalEvent::Input(InputEvent::Unknown))),
+                    val @ b'A'..=b'E' => Some(InputEvent::Keyboard(KeyEvent::F(1 + val - b'A'))),
+                    _ => Some(InputEvent::Unknown),
                 }
             }
         }
-        b'D' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
-            KeyEvent::Left,
-        )))),
-        b'C' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
-            KeyEvent::Right,
-        )))),
-        b'A' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
-            KeyEvent::Up,
-        )))),
-        b'B' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
-            KeyEvent::Down,
-        )))),
-        b'H' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
-            KeyEvent::Home,
-        )))),
-        b'F' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
-            KeyEvent::End,
-        )))),
-        b'Z' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
-            KeyEvent::BackTab,
-        )))),
-        b'M' => parse_csi_x10_mouse(&buffer[1..]),
-        b'<' => parse_csi_xterm_mouse(&buffer[1..]),
+        b'D' => Some(InputEvent::Keyboard(KeyEvent::Left)),
+        b'C' => Some(InputEvent::Keyboard(KeyEvent::Right)),
+        b'A' => Some(InputEvent::Keyboard(KeyEvent::Up)),
+        b'B' => Some(InputEvent::Keyboard(KeyEvent::Down)),
+        b'H' => Some(InputEvent::Keyboard(KeyEvent::Home)),
+        b'F' => Some(InputEvent::Keyboard(KeyEvent::End)),
+        b'Z' => Some(InputEvent::Keyboard(KeyEvent::BackTab)),
+        b'M' => return parse_csi_x10_mouse(&buffer[1..]),
+        b'<' => return parse_csi_xterm_mouse(&buffer[1..]),
         b'0'..=b'9' => {
             // Numbered escape code.
             if buffer.len() == 1 {
-                Ok(None)
+                None
             } else {
                 // The final byte of a CSI sequence can be in the range 64-126, so
                 // let's keep reading anything else.
                 let last_byte = *buffer.last().unwrap();
                 if last_byte < 64 || last_byte > 126 {
-                    Ok(None)
+                    None
                 } else {
                     match buffer[buffer.len() - 1] {
-                        b'M' => parse_csi_rxvt_mouse(buffer),
-                        b'~' => parse_csi_special_key_code(buffer),
-                        b'R' => parse_csi_cursor_position(buffer),
-                        _ => parse_csi_modifier_key_code(buffer),
+                        b'M' => return parse_csi_rxvt_mouse(buffer),
+                        b'~' => return parse_csi_special_key_code(buffer),
+                        b'R' => return parse_csi_cursor_position(buffer),
+                        _ => return parse_csi_modifier_key_code(buffer),
                     }
                 }
             }
         }
-        _ => Ok(Some(InternalEvent::Input(InputEvent::Unknown))),
-    }
+        _ => Some(InputEvent::Unknown),
+    };
+
+    Ok(input_event.map(InternalEvent::Input))
+}
+
+fn next_parsed<T>(iter: &mut dyn Iterator<Item = &str>) -> Result<T>
+where
+    T: std::str::FromStr,
+{
+    iter.next()
+        .ok_or_else(|| could_not_parse_event_error())?
+        .parse::<T>()
+        .map_err(|_| could_not_parse_event_error())
 }
 
 // Buffer does NOT contain: ESC [
@@ -441,16 +437,8 @@ fn parse_csi_cursor_position(buffer: &[u8]) -> Result<Option<InternalEvent>> {
 
     let mut split = s.split(';');
 
-    let mut next_u16 = || -> Result<u16> {
-        split
-            .next()
-            .ok_or_else(|| could_not_parse_event_error())?
-            .parse::<u16>()
-            .map_err(|_| could_not_parse_event_error())
-    };
-
-    let y = next_u16()? - 1;
-    let x = next_u16()? - 1;
+    let y = next_parsed::<u16>(&mut split)? - 1;
+    let x = next_parsed::<u16>(&mut split)? - 1;
 
     Ok(Some(InternalEvent::CursorPosition(x, y)))
 }
@@ -460,7 +448,7 @@ fn parse_csi_modifier_key_code(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     let modifier = buffer[buffer.len() - 2];
     let key = buffer[buffer.len() - 1];
 
-    let event = match (modifier, key) {
+    let input_event = match (modifier, key) {
         (53, 65) => InputEvent::Keyboard(KeyEvent::CtrlUp),
         (53, 66) => InputEvent::Keyboard(KeyEvent::CtrlDown),
         (53, 67) => InputEvent::Keyboard(KeyEvent::CtrlRight),
@@ -472,7 +460,7 @@ fn parse_csi_modifier_key_code(buffer: &[u8]) -> Result<Option<InternalEvent>> {
         _ => InputEvent::Unknown,
     };
 
-    Ok(Some(InternalEvent::Input(event)))
+    Ok(Some(InternalEvent::Input(input_event)))
 }
 
 // Buffer does NOT contain: ESC [
@@ -481,23 +469,15 @@ fn parse_csi_special_key_code(buffer: &[u8]) -> Result<Option<InternalEvent>> {
         .map_err(|_| could_not_parse_event_error())?;
     let mut split = s.split(';');
 
-    let mut next_u8 = || -> Result<u8> {
-        split
-            .next()
-            .ok_or_else(|| could_not_parse_event_error())?
-            .parse::<u8>()
-            .map_err(|_| could_not_parse_event_error())
-    };
-
     // This CSI sequence can be a list of semicolon-separated numbers.
-    let first = next_u8()?;
+    let first = next_parsed::<u8>(&mut split)?;
 
-    if next_u8().is_ok() {
+    if next_parsed::<u8>(&mut split).is_ok() {
         // TODO: handle multiple values for key modifiers (ex: values [3, 2] means Shift+Delete)
         return Ok(Some(InternalEvent::Input(InputEvent::Unknown)));
     }
 
-    let event = match first {
+    let input_event = match first {
         1 | 7 => InputEvent::Keyboard(KeyEvent::Home),
         2 => InputEvent::Keyboard(KeyEvent::Insert),
         3 => InputEvent::Keyboard(KeyEvent::Delete),
@@ -510,7 +490,7 @@ fn parse_csi_special_key_code(buffer: &[u8]) -> Result<Option<InternalEvent>> {
         _ => InputEvent::Unknown,
     };
 
-    Ok(Some(InternalEvent::Input(event)))
+    Ok(Some(InternalEvent::Input(input_event)))
 }
 
 // Buffer does NOT contain: ESC [
@@ -522,19 +502,11 @@ fn parse_csi_rxvt_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
         .map_err(|_| could_not_parse_event_error())?;
     let mut split = s.split(';');
 
-    let mut next_u16 = || -> Result<u16> {
-        split
-            .next()
-            .ok_or_else(|| could_not_parse_event_error())?
-            .parse::<u16>()
-            .map_err(|_| could_not_parse_event_error())
-    };
+    let cb = next_parsed::<u16>(&mut split)?;
+    let cx = next_parsed::<u16>(&mut split)?;
+    let cy = next_parsed::<u16>(&mut split)?;
 
-    let cb = next_u16()?;
-    let cx = next_u16()?;
-    let cy = next_u16()?;
-
-    let event = match cb {
+    let mouse_input_event = match cb {
         32 => MouseEvent::Press(MouseButton::Left, cx, cy),
         33 => MouseEvent::Press(MouseButton::Middle, cx, cy),
         34 => MouseEvent::Press(MouseButton::Right, cx, cy),
@@ -544,7 +516,9 @@ fn parse_csi_rxvt_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
         _ => MouseEvent::Unknown,
     };
 
-    Ok(Some(InternalEvent::Input(InputEvent::Mouse(event))))
+    Ok(Some(InternalEvent::Input(InputEvent::Mouse(
+        mouse_input_event,
+    ))))
 }
 
 // Buffer does NOT contain: ESC [ M
@@ -563,26 +537,28 @@ fn parse_csi_x10_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     let cx = buffer[2].saturating_sub(32) as u16 - 1;
     let cy = buffer[3].saturating_sub(32) as u16 - 1;
 
+    let mouse_input_event = match cb & 0b11 {
+        0 => {
+            if cb & 0x40 != 0 {
+                MouseEvent::Press(MouseButton::WheelUp, cx, cy)
+            } else {
+                MouseEvent::Press(MouseButton::Left, cx, cy)
+            }
+        }
+        1 => {
+            if cb & 0x40 != 0 {
+                MouseEvent::Press(MouseButton::WheelDown, cx, cy)
+            } else {
+                MouseEvent::Press(MouseButton::Middle, cx, cy)
+            }
+        }
+        2 => MouseEvent::Press(MouseButton::Right, cx, cy),
+        3 => MouseEvent::Release(cx, cy),
+        _ => MouseEvent::Unknown,
+    };
+
     Ok(Some(InternalEvent::Input(InputEvent::Mouse(
-        match cb & 0b11 {
-            0 => {
-                if cb & 0x40 != 0 {
-                    MouseEvent::Press(MouseButton::WheelUp, cx, cy)
-                } else {
-                    MouseEvent::Press(MouseButton::Left, cx, cy)
-                }
-            }
-            1 => {
-                if cb & 0x40 != 0 {
-                    MouseEvent::Press(MouseButton::WheelDown, cx, cy)
-                } else {
-                    MouseEvent::Press(MouseButton::Middle, cx, cy)
-                }
-            }
-            2 => MouseEvent::Press(MouseButton::Right, cx, cy),
-            3 => MouseEvent::Release(cx, cy),
-            _ => MouseEvent::Unknown,
-        },
+        mouse_input_event,
     ))))
 }
 
@@ -599,23 +575,15 @@ fn parse_csi_xterm_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
         .map_err(|_| could_not_parse_event_error())?;
     let mut split = s.split(';');
 
-    let mut next_u16 = || -> Result<u16> {
-        split
-            .next()
-            .ok_or_else(|| could_not_parse_event_error())?
-            .parse::<u16>()
-            .map_err(|_| could_not_parse_event_error())
-    };
-
-    let cb = next_u16()?;
+    let cb = next_parsed::<u16>(&mut split)?;
 
     // See http://www.xfree86.org/current/ctlseqs.html#Mouse%20Tracking
     // The upper left character position on the terminal is denoted as 1,1.
     // Subtract 1 to keep it synced with cursor
-    let cx = next_u16()? - 1;
-    let cy = next_u16()? - 1;
+    let cx = next_parsed::<u16>(&mut split)? - 1;
+    let cy = next_parsed::<u16>(&mut split)? - 1;
 
-    match cb {
+    let input_event = match cb {
         0..=2 | 64..=65 => {
             let button = match cb {
                 0 => MouseButton::Left,
@@ -626,34 +594,35 @@ fn parse_csi_xterm_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
                 _ => unreachable!(),
             };
             match buffer.last().unwrap() {
-                b'M' => Ok(Some(InternalEvent::Input(InputEvent::Mouse(
-                    MouseEvent::Press(button, cx, cy),
-                )))),
-                b'm' => Ok(Some(InternalEvent::Input(InputEvent::Mouse(
-                    MouseEvent::Release(cx, cy),
-                )))),
-                _ => Ok(Some(InternalEvent::Input(InputEvent::Unknown))),
+                b'M' => InputEvent::Mouse(MouseEvent::Press(button, cx, cy)),
+                b'm' => InputEvent::Mouse(MouseEvent::Release(cx, cy)),
+                _ => InputEvent::Unknown,
             }
         }
-        32 => Ok(Some(InternalEvent::Input(InputEvent::Mouse(
-            MouseEvent::Hold(cx, cy),
-        )))),
-        3 => Ok(Some(InternalEvent::Input(InputEvent::Mouse(
-            MouseEvent::Release(cx, cy),
-        )))),
-        _ => Ok(Some(InternalEvent::Input(InputEvent::Unknown))),
-    }
+        32 => InputEvent::Mouse(MouseEvent::Hold(cx, cy)),
+        3 => InputEvent::Mouse(MouseEvent::Release(cx, cy)),
+        _ => InputEvent::Unknown,
+    };
+
+    Ok(Some(InternalEvent::Input(input_event)))
 }
 
 fn parse_utf8_char(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     match std::str::from_utf8(buffer) {
-        Ok(s) => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
-            KeyEvent::Char(match s.chars().next() {
-                Some(ch) => ch,
-                None => return Err(could_not_parse_event_error()),
-            }),
-        )))),
+        Ok(s) => {
+            let event = s
+                .chars()
+                .next()
+                .ok_or_else(|| could_not_parse_event_error())
+                .map(KeyEvent::Char)
+                .map(InputEvent::Keyboard)
+                .map(InternalEvent::Input)?;
+
+            Ok(Some(event))
+        }
+        // UTF-8 character can be constructed from 4 bytes, wait for more
         Err(_) if buffer.len() < 4 => Ok(None),
+        // We have at least 4 bytes, fail if we can't create an UTF-8 char
         _ => Err(could_not_parse_event_error()),
     }
 }
