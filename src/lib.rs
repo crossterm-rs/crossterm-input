@@ -71,6 +71,7 @@ pub enum InputEvent {
     /// Internal cursor position event. Don't use it, it will be removed in the
     /// `crossterm` 1.0.
     #[doc(hidden)]
+    #[cfg(unix)]
     CursorPosition(u16, u16), // TODO 1.0: Remove
 }
 
@@ -183,6 +184,7 @@ pub(crate) enum InternalEvent {
     /// An input event.
     Input(InputEvent),
     /// A cursor position (`x`, `y`).
+    #[cfg(unix)]
     CursorPosition(u16, u16),
 }
 
