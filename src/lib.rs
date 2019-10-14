@@ -179,16 +179,17 @@ pub enum KeyEvent {
 ///
 /// Encapsulates publicly available `InputEvent` with additional internal
 /// events that shouldn't be publicly available to the crate users.
+#[cfg(unix)]
 #[derive(Debug, PartialOrd, PartialEq, Hash, Clone)]
 pub(crate) enum InternalEvent {
     /// An input event.
     Input(InputEvent),
     /// A cursor position (`x`, `y`).
-    #[cfg(unix)]
     CursorPosition(u16, u16),
 }
 
 /// Converts an `InternalEvent` into a possible `InputEvent`.
+#[cfg(unix)]
 impl From<InternalEvent> for Option<InputEvent> {
     fn from(ie: InternalEvent) -> Self {
         match ie {
