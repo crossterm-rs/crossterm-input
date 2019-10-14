@@ -6,7 +6,9 @@
 - Remove all references to the crossterm book
 - Mouse coordinates synchronized with the cursor (breaking)
   - Upper/left reported as `(0, 0)`
-- Fixed bug that read sync didnt block
+- Fixed bug that read sync didn't block (Windows)
+- AsyncReader produces mouse events (#271)
+  - One reading thread per application, not per AsyncReader
 
 ## Windows only
 
