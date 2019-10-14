@@ -128,20 +128,24 @@ impl Input for UnixInput {
 /// ```
 pub struct AsyncReader {
     rx: Option<Receiver<InternalEvent>>,
-    sentinel: Option<InputEvent>,
+    stop_event: Option<InputEvent>,
 }
 
 impl AsyncReader {
     /// Creates a new `AsyncReader`.
     ///
+    /// # Arguments
+    ///
+    /// * `stop_event` - if set, no more events will be produced if this exact event is reached.
+    ///
     /// # Notes
     ///
     /// * A thread is spawned/reused to read the input.
     /// * The reading thread is cleaned up when you drop the `AsyncReader`.
-    fn new(sentinel: Option<InputEvent>) -> AsyncReader {
+    fn new(stop_event: Option<InputEvent>) -> AsyncReader {
         AsyncReader {
             rx: Some(internal_event_receiver()),
-            sentinel,
+            stop_event,
         }
     }
 
