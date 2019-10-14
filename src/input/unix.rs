@@ -33,7 +33,7 @@ impl Input for UnixInput {
     fn read_until_async(&self, delimiter: u8) -> AsyncReader {
         let sentinel = match delimiter {
             b'\n' | b'\r' => Some(KeyEvent::Enter),
-            27 => Some(KeyEvent::Esc),
+            b'\x1B' => Some(KeyEvent::Esc),
             c if c.is_ascii() => Some(KeyEvent::Char(c as char)),
             _ => None,
         }
