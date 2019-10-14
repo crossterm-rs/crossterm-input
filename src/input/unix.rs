@@ -172,39 +172,29 @@ impl Iterator for AsyncReader {
     fn next(&mut self) -> Option<Self::Item> {
         // TODO 1.0: This whole `InternalEvent` -> `InputEvent` mapping should be shared
         //           between UNIX & Windows implementations
-        if let Some(rx) = self.rx.take() {
-            match rx.try_recv() {
-                Ok(internal_event) => {
-                    // Map `InternalEvent` to `InputEvent`
-                    match internal_event.into() {
-                        Some(input_event) => {
-                            // Did we reach sentinel?
-                            if !(self.sentinel.is_some()
-                                && self.sentinel.as_ref() == Some(&input_event))
-                            {
-                                // No sentinel reached, put the receiver back
-                                self.rx = Some(rx);
-                            }
 
-                            Some(input_event)
-                        }
-                        None => {
-                            // `InternalEvent` swallowed, put the receiver back for another events
-                            self.rx = Some(rx);
-                            None
-                        }
-                    }
+        let ref mut rx = match self.rx.as_ref() {
+            Some(rx) => rx,
+            None => return None,
+        };
+
+        match rx.try_recv() {
+            Ok(internal_event) => {
+                let input_event = internal_event.into();
+
+                if self.stop_event.is_some() && input_event == self.stop_event {
+                    // Drop the receiver, stop event received
+                    self.rx = None;
                 }
-                Err(mpsc::TryRecvError::Empty) => {
-                    // No event, put the receiver back for another events
-                    self.rx = Some(rx);
-                    None
-                }
-                // Sender closed, drop the receiver (do not put it back)
-                Err(mpsc::TryRecvError::Disconnected) => None,
+
+                input_event
             }
-        } else {
-            None
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                // Sender dropped, drop the receiver
+                self.rx = None;
+                None
+            }
         }
     }
 }
@@ -286,22 +276,19 @@ impl Iterator for SyncReader {
     fn next(&mut self) -> Option<Self::Item> {
         // TODO 1.0: This whole `InternalEvent` -> `InputEvent` mapping should be shared
         //           between UNIX & Windows implementations
-        if let Some(rx) = self.rx.take() {
-            match rx.recv() {
-                Ok(internal_event) => {
-                    // We have an internal event, map it to `InputEvent`
-                    let event = internal_event.into();
 
-                    // Put the receiver back for more events
-                    self.rx = Some(rx);
+        let ref mut rx = match self.rx.as_ref() {
+            Some(rx) => rx,
+            None => return None,
+        };
 
-                    event
-                }
-                // Sender is closed, do not put receiver back
-                Err(mpsc::RecvError) => None,
+        match rx.recv() {
+            Ok(internal_event) => internal_event.into(),
+            Err(mpsc::RecvError) => {
+                // Sender is dropped, drop the receiver
+                self.rx = None;
+                None
             }
-        } else {
-            None
         }
     }
 }
