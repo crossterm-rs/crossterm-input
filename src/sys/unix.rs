@@ -327,7 +327,7 @@ fn parse_event(buffer: &[u8], input_available: bool) -> Result<Option<InternalEv
                         if buffer.len() == 2 {
                             Ok(None)
                         } else {
-                            match buffer[3] {
+                            match buffer[2] {
                                 // F1-F4
                                 val @ b'P'..=b'S' => Ok(Some(InternalEvent::Input(
                                     InputEvent::Keyboard(KeyEvent::F(1 + val - b'P')),
@@ -336,7 +336,7 @@ fn parse_event(buffer: &[u8], input_available: bool) -> Result<Option<InternalEv
                             }
                         }
                     }
-                    b'[' => parse_csi(&buffer[2..]),
+                    b'[' => parse_csi(buffer),
                     b'\x1B' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
                         KeyEvent::Esc,
                     )))),
@@ -366,18 +366,19 @@ fn parse_event(buffer: &[u8], input_available: bool) -> Result<Option<InternalEv
     }
 }
 
-// Buffer does NOT contain first two bytes: ESC [
 fn parse_csi(buffer: &[u8]) -> Result<Option<InternalEvent>> {
-    if buffer.is_empty() {
+    assert!(buffer.starts_with(&[b'\x1B', b'['])); // ESC [
+
+    if buffer.len() == 2 {
         return Ok(None);
     }
 
-    let input_event = match buffer[0] {
+    let input_event = match buffer[2] {
         b'[' => {
-            if buffer.len() == 1 {
+            if buffer.len() == 3 {
                 None
             } else {
-                match buffer[1] {
+                match buffer[3] {
                     // NOTE (@imdaveho): cannot find when this occurs;
                     // having another '[' after ESC[ not a likely scenario
                     val @ b'A'..=b'E' => Some(InputEvent::Keyboard(KeyEvent::F(1 + val - b'A'))),
@@ -392,11 +393,11 @@ fn parse_csi(buffer: &[u8]) -> Result<Option<InternalEvent>> {
         b'H' => Some(InputEvent::Keyboard(KeyEvent::Home)),
         b'F' => Some(InputEvent::Keyboard(KeyEvent::End)),
         b'Z' => Some(InputEvent::Keyboard(KeyEvent::BackTab)),
-        b'M' => return parse_csi_x10_mouse(&buffer[1..]),
-        b'<' => return parse_csi_xterm_mouse(&buffer[1..]),
+        b'M' => return parse_csi_x10_mouse(buffer),
+        b'<' => return parse_csi_xterm_mouse(buffer),
         b'0'..=b'9' => {
             // Numbered escape code.
-            if buffer.len() == 1 {
+            if buffer.len() == 3 {
                 None
             } else {
                 // The final byte of a CSI sequence can be in the range 64-126, so
@@ -430,9 +431,14 @@ where
         .map_err(|_| could_not_parse_event_error())
 }
 
-// Buffer does NOT contain: ESC [
 fn parse_csi_cursor_position(buffer: &[u8]) -> Result<Option<InternalEvent>> {
-    let s = std::str::from_utf8(&buffer[..buffer.len() - 1])
+    // ESC [ Cy ; Cx R
+    //   Cy - cursor row number (starting from 1)
+    //   Cx - cursor column number (starting from 1)
+    assert!(buffer.starts_with(&[b'\x1B', b'['])); // ESC [
+    assert!(buffer.ends_with(&[b'R']));
+
+    let s = std::str::from_utf8(&buffer[2..buffer.len() - 1])
         .map_err(|_| could_not_parse_event_error())?;
 
     let mut split = s.split(';');
@@ -443,8 +449,9 @@ fn parse_csi_cursor_position(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     Ok(Some(InternalEvent::CursorPosition(x, y)))
 }
 
-// Buffer does NOT contain: ESC [
 fn parse_csi_modifier_key_code(buffer: &[u8]) -> Result<Option<InternalEvent>> {
+    assert!(buffer.starts_with(&[b'\x1B', b'['])); // ESC [
+
     let modifier = buffer[buffer.len() - 2];
     let key = buffer[buffer.len() - 1];
 
@@ -463,9 +470,11 @@ fn parse_csi_modifier_key_code(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     Ok(Some(InternalEvent::Input(input_event)))
 }
 
-// Buffer does NOT contain: ESC [
 fn parse_csi_special_key_code(buffer: &[u8]) -> Result<Option<InternalEvent>> {
-    let s = std::str::from_utf8(&buffer[..buffer.len() - 1])
+    assert!(buffer.starts_with(&[b'\x1B', b'['])); // ESC [
+    assert!(buffer.ends_with(&[b'~']));
+
+    let s = std::str::from_utf8(&buffer[2..buffer.len() - 1])
         .map_err(|_| could_not_parse_event_error())?;
     let mut split = s.split(';');
 
@@ -493,18 +502,20 @@ fn parse_csi_special_key_code(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     Ok(Some(InternalEvent::Input(input_event)))
 }
 
-// Buffer does NOT contain: ESC [
 fn parse_csi_rxvt_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     // rxvt mouse encoding:
     // ESC [ Cb ; Cx ; Cy ; M
 
-    let s = std::str::from_utf8(&buffer[..buffer.len() - 1])
+    assert!(buffer.starts_with(&[b'\x1B', b'['])); // ESC [
+    assert!(buffer.ends_with(&[b'M']));
+
+    let s = std::str::from_utf8(&buffer[2..buffer.len() - 1])
         .map_err(|_| could_not_parse_event_error())?;
     let mut split = s.split(';');
 
     let cb = next_parsed::<u16>(&mut split)?;
-    let cx = next_parsed::<u16>(&mut split)?;
-    let cy = next_parsed::<u16>(&mut split)?;
+    let cx = next_parsed::<u16>(&mut split)? - 1;
+    let cy = next_parsed::<u16>(&mut split)? - 1;
 
     let mouse_input_event = match cb {
         32 => MouseEvent::Press(MouseButton::Left, cx, cy),
@@ -521,21 +532,22 @@ fn parse_csi_rxvt_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     ))))
 }
 
-// Buffer does NOT contain: ESC [ M
 fn parse_csi_x10_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     // X10 emulation mouse encoding: ESC [ M CB Cx Cy (6 characters only).
     // NOTE (@imdaveho): cannot find documentation on this
 
-    if buffer.len() < 3 {
+    assert!(buffer.starts_with(&[b'\x1B', b'[', b'M'])); // ESC [ M
+
+    if buffer.len() < 6 {
         return Ok(None);
     }
 
-    let cb = buffer[1] as i8 - 32;
+    let cb = buffer[3] as i8 - 32;
     // See http://www.xfree86.org/current/ctlseqs.html#Mouse%20Tracking
     // The upper left character position on the terminal is denoted as 1,1.
     // Subtract 1 to keep it synced with cursor
-    let cx = buffer[2].saturating_sub(32) as u16 - 1;
-    let cy = buffer[3].saturating_sub(32) as u16 - 1;
+    let cx = buffer[4].saturating_sub(32) as u16 - 1;
+    let cy = buffer[5].saturating_sub(32) as u16 - 1;
 
     let mouse_input_event = match cb & 0b11 {
         0 => {
@@ -562,16 +574,16 @@ fn parse_csi_x10_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     ))))
 }
 
-// Buffer does NOT contain: ESC [ <
 fn parse_csi_xterm_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
-    // xterm mouse handling:
     // ESC [ < Cb ; Cx ; Cy (;) (M or m)
+
+    assert!(buffer.starts_with(&[b'\x1B', b'[', b'<'])); // ESC [ <
 
     if !buffer.ends_with(&[b'm']) && !buffer.ends_with(&[b'M']) {
         return Ok(None);
     }
 
-    let s = std::str::from_utf8(&buffer[..buffer.len() - 1])
+    let s = std::str::from_utf8(&buffer[3..buffer.len() - 1])
         .map_err(|_| could_not_parse_event_error())?;
     let mut split = s.split(';');
 
@@ -620,9 +632,286 @@ fn parse_utf8_char(buffer: &[u8]) -> Result<Option<InternalEvent>> {
 
             Ok(Some(event))
         }
-        // UTF-8 character can be constructed from 4 bytes, wait for more
-        Err(_) if buffer.len() < 4 => Ok(None),
-        // We have at least 4 bytes, fail if we can't create an UTF-8 char
-        _ => Err(could_not_parse_event_error()),
+        Err(_) => {
+            // from_utf8 failed, but we have to check if we need more bytes for code point
+            // and if all the bytes we have no are valid
+
+            let required_bytes = match buffer[0] {
+                // https://en.wikipedia.org/wiki/UTF-8#Description
+                (0x00..=0x7F) => 1, // 0xxxxxxx
+                (0xC0..=0xDF) => 2, // 110xxxxx 10xxxxxx
+                (0xE0..=0xEF) => 3, // 1110xxxx 10xxxxxx 10xxxxxx
+                (0xF0..=0xF7) => 4, // 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+                (0x80..=0xBF) | (0xF8..=0xFF) => return Err(could_not_parse_event_error()),
+            };
+
+            // More than 1 byte, check them for 10xxxxxx pattern
+            if required_bytes > 1 && buffer.len() > 1 {
+                for byte in &buffer[1..] {
+                    if byte & !0b0011_1111 != 0b1000_0000 {
+                        return Err(could_not_parse_event_error());
+                    }
+                }
+            }
+
+            if buffer.len() < required_bytes {
+                // All bytes looks good so far, but we need more of them
+                Ok(None)
+            } else {
+                Err(could_not_parse_event_error())
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_esc_key() {
+        assert_eq!(
+            parse_event("\x1B".as_bytes(), false).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Esc))),
+        );
+    }
+
+    #[test]
+    fn test_possible_esc_sequence() {
+        assert_eq!(parse_event("\x1B".as_bytes(), true).unwrap(), None,);
+    }
+
+    #[test]
+    fn test_parse_event_subsequent_calls() {
+        // The main purpose of this test is to check if we're passing
+        // correct slice to other parse_ functions.
+
+        // parse_csi_cursor_position
+        assert_eq!(
+            parse_event("\x1B[20;10R".as_bytes(), false).unwrap(),
+            Some(InternalEvent::CursorPosition(9, 19))
+        );
+
+        // parse_csi
+        assert_eq!(
+            parse_event("\x1B[D".as_bytes(), false).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Left))),
+        );
+
+        // parse_csi_modifier_key_code
+        assert_eq!(
+            parse_event("\x1B[2D".as_bytes(), false).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Keyboard(
+                KeyEvent::ShiftLeft
+            ))),
+        );
+
+        // parse_csi_special_key_code
+        assert_eq!(
+            parse_event("\x1B[3~".as_bytes(), false).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Delete))),
+        );
+
+        // parse_csi_rxvt_mouse
+        assert_eq!(
+            parse_event("\x1B[32;30;40;M".as_bytes(), false).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Mouse(MouseEvent::Press(
+                MouseButton::Left,
+                29,
+                39
+            ))))
+        );
+
+        // parse_csi_x10_mouse
+        assert_eq!(
+            parse_event("\x1B[M0\x60\x70".as_bytes(), false).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Mouse(MouseEvent::Press(
+                MouseButton::Left,
+                63,
+                79
+            ))))
+        );
+
+        // parse_csi_xterm_mouse
+        assert_eq!(
+            parse_event("\x1B[<0;20;10;M".as_bytes(), false).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Mouse(MouseEvent::Press(
+                MouseButton::Left,
+                19,
+                9
+            ))))
+        );
+
+        // parse_utf8_char
+        assert_eq!(
+            parse_event("Ž".as_bytes(), false).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Char(
+                'Ž'
+            )))),
+        );
+    }
+
+    #[test]
+    fn test_parse_event() {
+        assert_eq!(
+            parse_event("\t".as_bytes(), false).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Tab))),
+        );
+    }
+
+    #[test]
+    fn test_parse_csi_cursor_position() {
+        assert_eq!(
+            parse_csi_cursor_position("\x1B[20;10R".as_bytes()).unwrap(),
+            Some(InternalEvent::CursorPosition(9, 19))
+        );
+    }
+
+    #[test]
+    fn test_parse_csi() {
+        assert_eq!(
+            parse_csi("\x1B[D".as_bytes()).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Left))),
+        );
+    }
+
+    #[test]
+    fn test_parse_csi_modifier_key_code() {
+        assert_eq!(
+            parse_csi_modifier_key_code("\x1B[2D".as_bytes()).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Keyboard(
+                KeyEvent::ShiftLeft
+            ))),
+        );
+    }
+
+    #[test]
+    fn test_parse_csi_special_key_code() {
+        assert_eq!(
+            parse_csi_special_key_code("\x1B[3~".as_bytes()).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Delete))),
+        );
+    }
+
+    #[test]
+    fn test_parse_csi_special_key_code_multiple_values_not_supported() {
+        assert_eq!(
+            parse_csi_special_key_code("\x1B[3;2~".as_bytes()).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Unknown)),
+        );
+    }
+
+    #[test]
+    fn test_parse_csi_rxvt_mouse() {
+        assert_eq!(
+            parse_csi_rxvt_mouse("\x1B[32;30;40;M".as_bytes()).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Mouse(MouseEvent::Press(
+                MouseButton::Left,
+                29,
+                39
+            ))))
+        );
+    }
+
+    #[test]
+    fn test_parse_csi_x10_mouse() {
+        assert_eq!(
+            parse_csi_x10_mouse("\x1B[M0\x60\x70".as_bytes()).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Mouse(MouseEvent::Press(
+                MouseButton::Left,
+                63,
+                79
+            ))))
+        );
+    }
+
+    #[test]
+    fn test_parse_csi_xterm_mouse() {
+        assert_eq!(
+            parse_csi_xterm_mouse("\x1B[<0;20;10;M".as_bytes()).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Mouse(MouseEvent::Press(
+                MouseButton::Left,
+                19,
+                9
+            ))))
+        );
+        assert_eq!(
+            parse_csi_xterm_mouse("\x1B[<0;20;10M".as_bytes()).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Mouse(MouseEvent::Press(
+                MouseButton::Left,
+                19,
+                9
+            ))))
+        );
+        assert_eq!(
+            parse_csi_xterm_mouse("\x1B[<0;20;10;m".as_bytes()).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Mouse(
+                MouseEvent::Release(19, 9)
+            )))
+        );
+        assert_eq!(
+            parse_csi_xterm_mouse("\x1B[<0;20;10m".as_bytes()).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Mouse(
+                MouseEvent::Release(19, 9)
+            )))
+        );
+    }
+
+    #[test]
+    fn test_utf8() {
+        // https://www.php.net/manual/en/reference.pcre.pattern.modifiers.php#54805
+
+        // 'Valid ASCII' => "a",
+        assert_eq!(
+            parse_utf8_char("a".as_bytes()).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Char(
+                'a'
+            )))),
+        );
+
+        // 'Valid 2 Octet Sequence' => "\xc3\xb1",
+        assert_eq!(
+            parse_utf8_char(&[0xC3, 0xB1]).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Char(
+                'ñ'
+            )))),
+        );
+
+        // 'Invalid 2 Octet Sequence' => "\xc3\x28",
+        assert!(parse_utf8_char(&[0xC3, 0x28]).is_err());
+
+        // 'Invalid Sequence Identifier' => "\xa0\xa1",
+        assert!(parse_utf8_char(&[0xA0, 0xA1]).is_err());
+
+        // 'Valid 3 Octet Sequence' => "\xe2\x82\xa1",
+        assert_eq!(
+            parse_utf8_char(&[0xE2, 0x81, 0xA1]).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Char(
+                '\u{2061}'
+            )))),
+        );
+
+        // 'Invalid 3 Octet Sequence (in 2nd Octet)' => "\xe2\x28\xa1",
+        assert!(parse_utf8_char(&[0xE2, 0x28, 0xA1]).is_err());
+
+        // 'Invalid 3 Octet Sequence (in 3rd Octet)' => "\xe2\x82\x28",
+        assert!(parse_utf8_char(&[0xE2, 0x82, 0x28]).is_err());
+
+        // 'Valid 4 Octet Sequence' => "\xf0\x90\x8c\xbc",
+        assert_eq!(
+            parse_utf8_char(&[0xF0, 0x90, 0x8C, 0xBC]).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Char(
+                '𐌼'
+            )))),
+        );
+
+        // 'Invalid 4 Octet Sequence (in 2nd Octet)' => "\xf0\x28\x8c\xbc",
+        assert!(parse_utf8_char(&[0xF0, 0x28, 0x8C, 0xBC]).is_err());
+
+        // 'Invalid 4 Octet Sequence (in 3rd Octet)' => "\xf0\x90\x28\xbc",
+        assert!(parse_utf8_char(&[0xF0, 0x90, 0x28, 0xBC]).is_err());
+
+        // 'Invalid 4 Octet Sequence (in 4th Octet)' => "\xf0\x28\x8c\x28",
+        assert!(parse_utf8_char(&[0xF0, 0x28, 0x8C, 0x28]).is_err());
     }
 }
