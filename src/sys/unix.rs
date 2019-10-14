@@ -340,7 +340,12 @@ fn parse_event(buffer: &[u8], input_available: bool) -> Result<Option<InternalEv
                     b'\x1B' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
                         KeyEvent::Esc,
                     )))),
-                    _ => parse_utf8_char(buffer),
+                    _ => parse_utf8_char(&buffer[1..]).map(|maybe_char| {
+                        maybe_char
+                            .map(KeyEvent::Alt)
+                            .map(InputEvent::Keyboard)
+                            .map(InternalEvent::Input)
+                    }),
                 }
             }
         }
@@ -362,7 +367,12 @@ fn parse_event(buffer: &[u8], input_available: bool) -> Result<Option<InternalEv
         b'\0' => Ok(Some(InternalEvent::Input(InputEvent::Keyboard(
             KeyEvent::Null,
         )))),
-        _ => parse_utf8_char(buffer),
+        _ => parse_utf8_char(buffer).map(|maybe_char| {
+            maybe_char
+                .map(KeyEvent::Char)
+                .map(InputEvent::Keyboard)
+                .map(InternalEvent::Input)
+        }),
     }
 }
 
@@ -619,18 +629,15 @@ fn parse_csi_xterm_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
     Ok(Some(InternalEvent::Input(input_event)))
 }
 
-fn parse_utf8_char(buffer: &[u8]) -> Result<Option<InternalEvent>> {
+fn parse_utf8_char(buffer: &[u8]) -> Result<Option<char>> {
     match std::str::from_utf8(buffer) {
         Ok(s) => {
-            let event = s
+            let ch = s
                 .chars()
                 .next()
-                .ok_or_else(|| could_not_parse_event_error())
-                .map(KeyEvent::Char)
-                .map(InputEvent::Keyboard)
-                .map(InternalEvent::Input)?;
+                .ok_or_else(|| could_not_parse_event_error())?;
 
-            Ok(Some(event))
+            Ok(Some(ch))
         }
         Err(_) => {
             // from_utf8 failed, but we have to check if we need more bytes for code point
@@ -679,6 +686,16 @@ mod tests {
     #[test]
     fn test_possible_esc_sequence() {
         assert_eq!(parse_event("\x1B".as_bytes(), true).unwrap(), None,);
+    }
+
+    #[test]
+    fn test_alt_key() {
+        assert_eq!(
+            parse_event("\x1Bc".as_bytes(), false).unwrap(),
+            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Alt(
+                'c'
+            )))),
+        );
     }
 
     #[test]
@@ -862,20 +879,10 @@ mod tests {
         // https://www.php.net/manual/en/reference.pcre.pattern.modifiers.php#54805
 
         // 'Valid ASCII' => "a",
-        assert_eq!(
-            parse_utf8_char("a".as_bytes()).unwrap(),
-            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Char(
-                'a'
-            )))),
-        );
+        assert_eq!(parse_utf8_char("a".as_bytes()).unwrap(), Some('a'),);
 
         // 'Valid 2 Octet Sequence' => "\xc3\xb1",
-        assert_eq!(
-            parse_utf8_char(&[0xC3, 0xB1]).unwrap(),
-            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Char(
-                'ñ'
-            )))),
-        );
+        assert_eq!(parse_utf8_char(&[0xC3, 0xB1]).unwrap(), Some('ñ'),);
 
         // 'Invalid 2 Octet Sequence' => "\xc3\x28",
         assert!(parse_utf8_char(&[0xC3, 0x28]).is_err());
@@ -886,9 +893,7 @@ mod tests {
         // 'Valid 3 Octet Sequence' => "\xe2\x82\xa1",
         assert_eq!(
             parse_utf8_char(&[0xE2, 0x81, 0xA1]).unwrap(),
-            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Char(
-                '\u{2061}'
-            )))),
+            Some('\u{2061}'),
         );
 
         // 'Invalid 3 Octet Sequence (in 2nd Octet)' => "\xe2\x28\xa1",
@@ -900,9 +905,7 @@ mod tests {
         // 'Valid 4 Octet Sequence' => "\xf0\x90\x8c\xbc",
         assert_eq!(
             parse_utf8_char(&[0xF0, 0x90, 0x8C, 0xBC]).unwrap(),
-            Some(InternalEvent::Input(InputEvent::Keyboard(KeyEvent::Char(
-                '𐌼'
-            )))),
+            Some('𐌼'),
         );
 
         // 'Invalid 4 Octet Sequence (in 2nd Octet)' => "\xf0\x28\x8c\xbc",
