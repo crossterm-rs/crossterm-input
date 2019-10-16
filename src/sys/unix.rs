@@ -1,17 +1,53 @@
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::os::unix::io::IntoRawFd;
+use std::os::unix::io::RawFd;
 use std::sync::{
+    atomic::{AtomicBool, Ordering},
     mpsc::{self, Receiver, Sender},
     Arc, Mutex,
 };
 use std::time::Duration;
-use std::{fs, io, mem, thread};
+use std::{fs, io, thread};
 
 use crossterm_utils::{ErrorKind, Result};
+use libc::{c_int, c_void, size_t, ssize_t};
+use mio::unix::EventedFd;
+use mio::{Events, Poll, PollOpt, Ready, Token};
 
 use lazy_static::lazy_static;
 
 use crate::{InputEvent, InternalEvent, KeyEvent, MouseButton, MouseEvent};
+
+use self::utils::{check_for_error, check_for_error_result};
+
+lazy_static! {
+    /// A shared internal event provider.
+    static ref INTERNAL_EVENT_PROVIDER: Mutex<Box<dyn InternalEventProvider>> =
+        Mutex::new(default_internal_event_provider());
+}
+
+// TODO 1.0: Enhance utils::sys::unix::wrap_with_result and use it
+mod utils {
+    use std::io;
+
+    use libc::c_int;
+
+    pub fn check_for_error(result: c_int) -> io::Result<()> {
+        if result == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    // TODO 1.0: Enhance utils::sys::unix::wrap_with_result and use it
+    pub fn check_for_error_result(result: c_int) -> io::Result<libc::c_int> {
+        if result == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(result)
+        }
+    }
+}
 
 /// An internal event provider interface.
 pub(crate) trait InternalEventProvider: Send {
@@ -21,13 +57,7 @@ pub(crate) trait InternalEventProvider: Send {
     fn pause(&mut self);
 
     /// Creates a new `InternalEvent` receiver.
-    fn receiver(&mut self) -> Receiver<InternalEvent>;
-}
-
-lazy_static! {
-    /// A shared internal event provider.
-    static ref INTERNAL_EVENT_PROVIDER: Mutex<Box<dyn InternalEventProvider>> =
-        Mutex::new(default_internal_event_provider());
+    fn receiver(&mut self) -> Result<Receiver<InternalEvent>>;
 }
 
 /// Creates a new default internal event provider.
@@ -54,18 +84,15 @@ impl UnixInternalEventChannels {
         }
     }
 
-    /// Sends an `InternalEvent` to all available channels. Returns `false` if the
-    /// list of channels is empty.
+    /// Sends an `InternalEvent` to all available channels.
     ///
     /// # Notes
     ///
     /// Channel is removed if the receiving end was dropped.
     ///
-    fn send(&self, event: InternalEvent) -> bool {
+    fn send(&self, event: InternalEvent) {
         let mut guard = self.senders.lock().unwrap();
         guard.retain(|sender| sender.send(event.clone()).is_ok());
-
-        !guard.is_empty()
     }
 
     /// Creates a new `InternalEvent` receiver.
@@ -105,108 +132,239 @@ impl InternalEventProvider for UnixInternalEventProvider {
 
     /// Creates a new `InternalEvent` receiver and spawns a new reading
     /// thread (or reuses the existing one).
-    fn receiver(&mut self) -> Receiver<InternalEvent> {
+    fn receiver(&mut self) -> Result<Receiver<InternalEvent>> {
+        // If we have the `TtyReadingThread` value, but the thread itself isn't
+        // running, drop it, so we can spawn a new one below.
+        if !self
+            .reading_thread
+            .as_ref()
+            .map(TtyReadingThread::is_running)
+            .unwrap_or(false)
+        {
+            self.reading_thread = None;
+        }
+
         let rx = self.channels.receiver();
 
         if self.reading_thread.is_none() {
-            let reading_thread = TtyReadingThread::new(self.channels.clone());
+            let reading_thread = TtyReadingThread::new(self.channels.clone())?;
             self.reading_thread = Some(reading_thread);
         }
 
-        rx
+        Ok(rx)
     }
 }
 
-/// A simple standard input (or `/dev/tty`) wrapper for bytes reading or checking
-/// if there's an input available.
-struct TtyRaw {
-    fd: Option<RawFd>,
+// libstd::sys::unix::fd.rs
+fn max_len() -> usize {
+    // The maximum read limit on most posix-like systems is `SSIZE_MAX`,
+    // with the man page quoting that if the count of bytes to read is
+    // greater than `SSIZE_MAX` the result is "unspecified".
+    //
+    // On macOS, however, apparently the 64-bit libc is either buggy or
+    // intentionally showing odd behavior by rejecting any read with a size
+    // larger than or equal to INT_MAX. To handle both of these the read
+    // size is capped on both platforms.
+    if cfg!(target_os = "macos") {
+        <c_int>::max_value() as usize - 1
+    } else {
+        <ssize_t>::max_value() as usize
+    }
 }
 
-impl TtyRaw {
-    fn new() -> TtyRaw {
-        let fd = if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
-            Some(libc::STDIN_FILENO)
-        } else {
+/// A file descriptor wrapper.
+///
+/// It allows to retrieve raw file descriptor, write to the file descriptor and
+/// mainly it closes the file descriptor once dropped.
+struct FileDesc {
+    fd: RawFd,
+    close_on_drop: bool,
+}
+
+impl FileDesc {
+    fn new(fd: RawFd) -> FileDesc {
+        FileDesc::with_close_on_drop(fd, true)
+    }
+
+    fn with_close_on_drop(fd: RawFd, close_on_drop: bool) -> FileDesc {
+        FileDesc { fd, close_on_drop }
+    }
+
+    fn read_byte(&self) -> Result<u8> {
+        let mut buf: [u8; 1] = [0];
+        utils::check_for_error(unsafe {
+            libc::read(self.fd, buf.as_mut_ptr() as *mut libc::c_void, 1) as c_int
+        })?;
+
+        Ok(buf[0])
+    }
+
+    fn write(&self, buf: &[u8]) -> io::Result<usize> {
+        // libstd::sys::unix::fd.rs
+
+        let ret = check_for_error_result(unsafe {
+            libc::write(
+                self.fd,
+                buf.as_ptr() as *const c_void,
+                std::cmp::min(buf.len(), max_len()) as size_t,
+            ) as c_int
+        })?;
+        Ok(ret as usize)
+    }
+
+    fn raw_fd(&self) -> RawFd {
+        self.fd
+    }
+}
+
+impl Drop for FileDesc {
+    // libstd::sys::unix::fd.rs
+
+    fn drop(&mut self) {
+        if self.close_on_drop {
+            // Note that errors are ignored when closing a file descriptor. The
+            // reason for this is that if an error occurs we don't actually know if
+            // the file descriptor was closed or not, and if we retried (for
+            // something like EINTR), we might close another valid file descriptor
+            // opened after we closed ours.
+            let _ = unsafe { libc::close(self.fd) };
+        }
+    }
+}
+
+/// Creates a new pipe and returns `(read, write)` file descriptors.
+fn pipe() -> Result<(FileDesc, FileDesc)> {
+    let (read_fd, write_fd) = unsafe {
+        let mut pipe_fds: [libc::c_int; 2] = [0; 2];
+        check_for_error(libc::pipe(pipe_fds.as_mut_ptr()))?;
+        (pipe_fds[0], pipe_fds[1])
+    };
+
+    let read_fd = FileDesc::new(read_fd);
+    let write_fd = FileDesc::new(write_fd);
+
+    Ok((read_fd, write_fd))
+}
+
+/// Creates a file descriptor pointing to the standard input or `/dev/tty`.
+fn tty_fd() -> Result<FileDesc> {
+    let (fd, close_on_drop) = if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
+        (libc::STDIN_FILENO, false)
+    } else {
+        (
             fs::OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open("/dev/tty")
-                .ok()
-                .map(|f| f.as_raw_fd())
-        };
+                .open("/dev/tty")?
+                .into_raw_fd(),
+            true,
+        )
+    };
 
-        TtyRaw { fd }
-    }
+    Ok(FileDesc::with_close_on_drop(fd, close_on_drop))
+}
 
-    fn raw_fd(&self) -> Result<RawFd> {
-        if let Some(fd) = self.fd {
-            return Ok(fd);
+/// A main body of the `TtyReadingThread` reading thread.
+///
+/// # Arguments
+///
+/// * `channels` - `InternalEvent` recipients.
+/// * `shutdown_rx_fd` - shutdown pipe reading end file descriptor.
+fn tty_reading_thread(channels: UnixInternalEventChannels, shutdown_rx_fd: FileDesc) -> Result<()> {
+    // Tokens to identify file descriptor
+    const TTY_TOKEN: Token = Token(0);
+    const SHUTDOWN_TOKEN: Token = Token(1);
+
+    // Get stdin (if a tty) or open /dev/tty
+    let tty_fd = tty_fd()?;
+
+    // Get raw file descriptors for
+    let tty_raw_fd = tty_fd.raw_fd();
+    let shutdown_rx_raw_fd = shutdown_rx_fd.raw_fd();
+
+    // Setup polling with raw file descriptors
+    let tty_ev = EventedFd(&tty_raw_fd);
+    let shutdown_ev = EventedFd(&shutdown_rx_raw_fd);
+
+    let poll = Poll::new()?;
+    poll.register(&tty_ev, TTY_TOKEN, Ready::readable(), PollOpt::level())?;
+    poll.register(
+        &shutdown_ev,
+        SHUTDOWN_TOKEN,
+        Ready::readable(),
+        PollOpt::level(),
+    )?;
+
+    let mut events = Events::with_capacity(2);
+    let mut buffer: Vec<u8> = Vec::with_capacity(32);
+
+    let get_tokens =
+        |events: &Events| -> Vec<Token> { events.iter().map(|ev| ev.token()).collect() };
+
+    loop {
+        // Wait for an event on provided raw file descriptors
+        // No timeout means indefinitely
+        poll.poll(&mut events, None)?;
+
+        // Get tokens to identify file descriptors
+        let tokens = get_tokens(&events);
+
+        if tokens.contains(&SHUTDOWN_TOKEN) {
+            break;
         }
 
-        Err(ErrorKind::IoError(io::Error::new(
-            io::ErrorKind::Other,
-            "Unable to open TTY",
-        )))
-    }
+        if tokens.contains(&TTY_TOKEN) {
+            // There's an event on tty
+            if let Ok(byte) = tty_fd.read_byte() {
+                // Poll again to check if there's still anything to read when we read one byte.
+                // This time with 0 timeout which means return immediately.
+                //
+                // We need this information to distinguish between Esc key and possible
+                // Esc sequence.
+                poll.poll(&mut events, Some(Duration::from_secs(0)))?;
 
-    /// Reads a single byte.
-    fn read(&self) -> Result<u8> {
-        let fd = self.raw_fd()?;
+                let tokens = get_tokens(&events);
 
-        let mut buf: [u8; 1] = [0];
-        let read = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, 1) };
+                if tokens.contains(&SHUTDOWN_TOKEN) {
+                    break;
+                }
 
-        if read == -1 {
-            Err(ErrorKind::IoError(io::Error::last_os_error()))
-        } else {
-            Ok(buf[0])
+                let input_available = tokens.contains(&TTY_TOKEN);
+
+                buffer.push(byte);
+                match parse_event(&buffer, input_available) {
+                    // Not enough info to parse the event, wait for more bytes
+                    Ok(None) => {}
+                    // Clear the input buffer and send the event
+                    Ok(Some(event)) => {
+                        buffer.clear();
+                        channels.send(event);
+                    }
+                    // Malformed sequence, clear the buffer
+                    Err(_) => buffer.clear(),
+                }
+            }
         }
     }
-
-    /// Returns `true` if there's an input available within the given
-    /// `timeout`.
-    fn select(&self, timeout: Duration) -> Result<bool> {
-        let fd = self.raw_fd()?;
-
-        let mut timeout = libc::timeval {
-            tv_sec: timeout.as_secs() as libc::time_t,
-            tv_usec: timeout.subsec_micros() as libc::suseconds_t,
-        };
-
-        let sel = unsafe {
-            let mut raw_fd_set = mem::uninitialized::<libc::fd_set>();
-            libc::FD_ZERO(&mut raw_fd_set);
-            libc::FD_SET(fd, &mut raw_fd_set);
-
-            libc::select(
-                1,
-                &mut raw_fd_set,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                &mut timeout,
-            )
-        };
-
-        match sel {
-            1 => Ok(true),
-            -1 => Err(ErrorKind::IoError(io::Error::last_os_error())),
-            _ => Ok(false),
-        }
-    }
+    Ok(())
 }
 
 /// A stdin (or /dev/tty) reading thread.
 ///
-/// The reading thread will shutdown on it's own once you drop the
-/// `TtyReadingThread`.
+/// # Notes
+///
+/// The reading thread will shutdown on it's own once you drop the `TtyReadingThread`.
+///
+/// The reading can shutdown on it's own in case of any error. You should check if the
+/// thread is running with `is_running()` method.
+///
 struct TtyReadingThread {
-    /// A signal to shutdown the thread.
-    ///
-    /// If `load(Ordering::SeqCst)` returns `true`, the thread must exit.
-    shutdown: Arc<AtomicBool>,
+    /// Says if the thread is actually running or not.
+    running: Arc<AtomicBool>,
+    /// A write end of the shutdown pipe.
+    shutdown_tx: FileDesc,
     /// A reading thread join handle (if exists).
-    handle: Option<thread::JoinHandle<()>>,
+    handle: Option<thread::JoinHandle<Result<()>>>,
 }
 
 impl TtyReadingThread {
@@ -215,73 +373,48 @@ impl TtyReadingThread {
     /// # Arguments
     ///
     /// * `channels` - a list of channels to send all `InternalEvent`s to.
-    fn new(channels: UnixInternalEventChannels) -> TtyReadingThread {
-        let shutdown = Arc::new(AtomicBool::new(false));
+    fn new(channels: UnixInternalEventChannels) -> Result<TtyReadingThread> {
+        let (shutdown_rx, shutdown_tx) = pipe()?;
+        let running = Arc::new(AtomicBool::new(false));
 
-        let shutdown_signal = shutdown.clone();
-        let handle = thread::spawn(move || {
-            // Be extra careful and avoid unwraps, expects, ... and any kind of panic
-
-            let tty_raw = TtyRaw::new();
-            let mut buffer: Vec<u8> = Vec::with_capacity(32);
-
-            // TODO We should use better approach for signalling to avoid unnecessary looping
-            loop {
-                if let Ok(true) = tty_raw.select(Duration::from_millis(100)) {
-                    if let Ok(byte) = tty_raw.read() {
-                        buffer.push(byte);
-
-                        let input_available = match tty_raw.select(Duration::from_secs(0)) {
-                            Ok(input_available) => input_available,
-                            Err(_) => {
-                                // select() failed, assume false and continue
-                                false
-                            }
-                        };
-
-                        match parse_event(&buffer, input_available) {
-                            // Not enough info to parse the event, wait for more bytes
-                            Ok(None) => {}
-                            // Clear the input buffer and send the event
-                            Ok(Some(event)) => {
-                                buffer.clear();
-
-                                if !channels.send(event) {
-                                    // TODO This is pretty ugly. Thread should be stopped from outside.
-                                    INTERNAL_EVENT_PROVIDER.lock().unwrap().pause();
-                                }
-                            }
-                            // Malformed sequence, clear the buffer
-                            Err(_) => buffer.clear(),
-                        }
-                    }
-                }
-
-                if shutdown_signal.load(Ordering::SeqCst) {
-                    break;
-                }
+        let handle = thread::spawn({
+            let running = running.clone();
+            move || -> Result<()> {
+                running.store(true, Ordering::SeqCst);
+                let result = tty_reading_thread(channels, shutdown_rx);
+                running.store(false, Ordering::SeqCst);
+                result
             }
         });
 
-        TtyReadingThread {
-            shutdown,
+        Ok(TtyReadingThread {
+            running,
+            shutdown_tx,
             handle: Some(handle),
-        }
+        })
+    }
+
+    /// Returns `true` if the thread is running.
+    fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
+    fn shutdown(&self) {
+        let _ = self.shutdown_tx.write("My precious, shutdown.".as_bytes());
     }
 }
 
 impl Drop for TtyReadingThread {
     fn drop(&mut self) {
-        // Signal the thread to shutdown
-        self.shutdown.store(true, Ordering::SeqCst);
+        self.shutdown();
 
-        // Wait for the thread shutdown
+        // Safe to unwrap, it's taken in the drop() only
         let handle = self.handle.take().unwrap();
-        handle.join().unwrap();
+        let _ = handle.join();
     }
 }
 
-pub(crate) fn internal_event_receiver() -> Receiver<InternalEvent> {
+pub(crate) fn internal_event_receiver() -> Result<Receiver<InternalEvent>> {
     INTERNAL_EVENT_PROVIDER.lock().unwrap().receiver()
 }
 

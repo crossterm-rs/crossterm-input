@@ -143,8 +143,9 @@ impl AsyncReader {
     /// * A thread is spawned/reused to read the input.
     /// * The reading thread is cleaned up when you drop the `AsyncReader`.
     fn new(stop_event: Option<InputEvent>) -> AsyncReader {
+        // TODO 1.0: Following expect is here to keep the API compatible (no Result)
         AsyncReader {
-            rx: Some(internal_event_receiver()),
+            rx: Some(internal_event_receiver().expect("Unable to get event receiver")),
             stop_event,
         }
     }
@@ -260,8 +261,9 @@ pub struct SyncReader {
 
 impl SyncReader {
     fn new() -> SyncReader {
+        // TODO 1.0: Following expect is here to keep the API compatible (no Result)
         SyncReader {
-            rx: Some(internal_event_receiver()),
+            rx: Some(internal_event_receiver().expect("Unable to get event receiver")),
         }
     }
 }
