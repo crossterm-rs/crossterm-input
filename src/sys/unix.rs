@@ -754,6 +754,8 @@ fn parse_csi_xterm_mouse(buffer: &[u8]) -> Result<Option<InternalEvent>> {
                 _ => InputEvent::Unknown,
             }
         }
+        // TODO 1.0: Add MouseButton to Hold and report which button is pressed
+        // 33 - middle, 34 - right
         32 => InputEvent::Mouse(MouseEvent::Hold(cx, cy)),
         3 => InputEvent::Mouse(MouseEvent::Release(cx, cy)),
         _ => InputEvent::Unknown,
