@@ -83,7 +83,7 @@ pub enum MouseEvent {
     Press(MouseButton, u16, u16),
     /// Released mouse button at the location (column, row).
     Release(u16, u16),
-    /// Mouse moved with a pressed button to the new location (column, row).
+    /// Mouse moved with a pressed left button to the new location (column, row).
     Hold(u16, u16),
     /// An unknown mouse event.
     Unknown,
