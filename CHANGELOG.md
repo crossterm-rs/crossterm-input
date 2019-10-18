@@ -9,6 +9,9 @@
 - Fixed bug that read sync didn't block (Windows)
 - AsyncReader produces mouse events (#271)
   - One reading thread per application, not per AsyncReader
+- Fixed cursor position getting consumed by async reader
+- Implemented sync reader for read_char (requires raw mode)
+- Added mio for reading from FD and more efficient polling (UNIX only)
 
 ## Windows only
 
