@@ -6,7 +6,12 @@
 - Remove all references to the crossterm book
 - Mouse coordinates synchronized with the cursor (breaking)
   - Upper/left reported as `(0, 0)`
-- Fixed bug that read sync didnt block
+- Fixed bug that read sync didn't block (Windows)
+- AsyncReader produces mouse events (#271)
+  - One reading thread per application, not per AsyncReader
+- Fixed cursor position getting consumed by async reader
+- Implemented sync reader for read_char (requires raw mode)
+- Added mio for reading from FD and more efficient polling (UNIX only)
 
 ## Windows only
 

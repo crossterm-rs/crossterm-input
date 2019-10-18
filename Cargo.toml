@@ -17,6 +17,7 @@ crossterm_winapi = { git = "https://github.com/crossterm-rs/crossterm-winapi.git
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.51"
+mio = "0.6.19"
 
 [dependencies]
 crossterm_utils = { version = "0.3.1" }
