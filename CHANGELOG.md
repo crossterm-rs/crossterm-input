@@ -1,17 +1,22 @@
 # Version 0.5.0
 
-- Internal refactoring (no breaking changes)
-- Removed unsafe `static mut`
-- Documentation update
-- Remove all references to the crossterm book
-- Mouse coordinates synchronized with the cursor (breaking)
+- Internal refactoring ([PR #3](https://github.com/crossterm-rs/crossterm-input/pull/3))
+  - Removed unsafe `static mut`
+  - Documentation update
+  - Remove all references to the crossterm book
+- Sync documentation style ([PR #4](https://github.com/crossterm-rs/crossterm-input/pull/4))
+- Sync `SyncReader::next()` Windows and UNIX behavior ([PR #5](https://github.com/crossterm-rs/crossterm-input/pull/5))
+- Remove all references to the crossterm book ([PR #6](https://github.com/crossterm-rs/crossterm-input/pull/6)) 
+- Mouse coordinates synchronized with the cursor ([PR #7](https://github.com/crossterm-rs/crossterm-input/pull/7))
   - Upper/left reported as `(0, 0)`
-- Fixed bug that read sync didn't block (Windows)
-- AsyncReader produces mouse events (#271)
-  - One reading thread per application, not per AsyncReader
-- Fixed cursor position getting consumed by async reader
-- Implemented sync reader for read_char (requires raw mode)
-- Added mio for reading from FD and more efficient polling (UNIX only)
+- Fixed bug that read sync didn't block (Windows) ([PR #8](https://github.com/crossterm-rs/crossterm-input/pull/8))
+- Refactored UNIX readers ([PR #9](https://github.com/crossterm-rs/crossterm-input/pull/9))
+  - AsyncReader produces mouse events
+  - One reading thread per application, not per `AsyncReader`
+  - Cursor position no longer consumed by another `AsyncReader`
+  - Implemented sync reader for read_char (requires raw mode)
+  - Fixed `SIGTTIN` when executed under the LLDB
+  - Added mio for reading from FD and more efficient polling (UNIX only)
 
 ## Windows only
 
