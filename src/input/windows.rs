@@ -339,10 +339,7 @@ extern "C" {
 pub fn read_single_event() -> Result<Option<InputEvent>> {
     let console = Console::from(Handle::current_in_handle()?);
 
-    let input = match console.read_single_input_event() {
-        Ok(event) => event,
-        Err(_e) => return Ok(None),
-    };
+    let input = console.read_single_input_event()?;
 
     match input.event_type {
         InputEventType::KeyEvent => {
@@ -358,7 +355,6 @@ pub fn read_single_event() -> Result<Option<InputEvent>> {
     }
 }
 
-/// partially inspired by: https://github.com/retep998/wio-rs/blob/master/src/console.rs#L130
 pub fn read_input_events() -> Result<(u32, Vec<InputEvent>)> {
     let console = Console::from(Handle::current_in_handle()?);
 

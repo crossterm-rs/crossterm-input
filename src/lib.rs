@@ -37,8 +37,6 @@
 //! on the terminal screen. See the
 //! [`crossterm_screen`](https://docs.rs/crossterm_screen/) crate documentation to learn more.
 
-use std::io;
-
 #[doc(no_inline)]
 pub use crossterm_screen::{IntoRawMode, RawScreen};
 #[doc(no_inline)]
@@ -71,6 +69,11 @@ pub enum InputEvent {
     Unsupported(Vec<u8>), // TODO Not used, should be removed.
     /// An unknown event.
     Unknown,
+    /// Internal cursor position event. Don't use it, it will be removed in the
+    /// `crossterm` 1.0.
+    #[doc(hidden)]
+    #[cfg(unix)]
+    CursorPosition(u16, u16), // TODO 1.0: Remove
 }
 
 /// Represents a mouse event.
@@ -81,7 +84,7 @@ pub enum MouseEvent {
     Press(MouseButton, u16, u16),
     /// Released mouse button at the location (column, row).
     Release(u16, u16),
-    /// Mouse moved with a pressed button to the new location (column, row).
+    /// Mouse moved with a pressed left button to the new location (column, row).
     Hold(u16, u16),
     /// An unknown mouse event.
     Unknown,
@@ -173,6 +176,32 @@ pub enum KeyEvent {
     ShiftLeft,
 }
 
+/// An internal event.
+///
+/// Encapsulates publicly available `InputEvent` with additional internal
+/// events that shouldn't be publicly available to the crate users.
+#[cfg(unix)]
+#[derive(Debug, PartialOrd, PartialEq, Hash, Clone)]
+pub(crate) enum InternalEvent {
+    /// An input event.
+    Input(InputEvent),
+    /// A cursor position (`x`, `y`).
+    CursorPosition(u16, u16),
+}
+
+/// Converts an `InternalEvent` into a possible `InputEvent`.
+#[cfg(unix)]
+impl From<InternalEvent> for Option<InputEvent> {
+    fn from(ie: InternalEvent) -> Self {
+        match ie {
+            InternalEvent::Input(input_event) => Some(input_event),
+            // TODO 1.0: Swallow `CursorPosition` and return `None`.
+            // `cursor::pos_raw()` will be able to use this module `internal_event_receiver()`
+            InternalEvent::CursorPosition(x, y) => Some(InputEvent::CursorPosition(x, y)),
+        }
+    }
+}
+
 /// A terminal input.
 ///
 /// # Examples
@@ -243,11 +272,7 @@ impl TerminalInput {
     /// }
     /// ```
     pub fn read_line(&self) -> Result<String> {
-        let mut rv = String::new();
-        io::stdin().read_line(&mut rv)?;
-        let len = rv.trim_end_matches(&['\r', '\n'][..]).len();
-        rv.truncate(len);
-        Ok(rv)
+        self.input.read_line()
     }
 
     /// Reads one character from the user input.

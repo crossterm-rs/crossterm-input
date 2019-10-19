@@ -1,6 +1,8 @@
 //! A module that contains all the actions related to reading input from the terminal.
 //! Like reading a line, reading a character and reading asynchronously.
 
+use std::io;
+
 use crossterm_utils::Result;
 
 // TODO Create a new common AsyncReader structure (like TerminalCursor, TerminalInput, ...).
@@ -24,6 +26,33 @@ pub(crate) mod windows;
 /// This trait is implemented for Windows and UNIX systems.
 /// Unix is using the 'TTY' and windows is using 'libc' C functions to read the input.
 pub(crate) trait Input {
+    /// Reads one line from the user input and strips the new line character(s).
+    ///
+    /// This function **does not work** when the raw mode is enabled (see the
+    /// [`crossterm_screen`](https://docs.rs/crossterm_screen/) crate documentation
+    /// to learn more). You should use the
+    /// [`read_async`](struct.TerminalInput.html#method.read_async),
+    /// [`read_until_async`](struct.TerminalInput.html#method.read_until_async)
+    /// or [`read_sync`](struct.TerminalInput.html#method.read_sync) method if the
+    /// raw mode is enabled.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let input = crossterm_input::input();
+    /// match input.read_line() {
+    ///     Ok(s) => println!("string typed: {}", s),
+    ///     Err(e) => println!("error: {}", e),
+    /// }
+    /// ```
+    fn read_line(&self) -> Result<String> {
+        let mut rv = String::new();
+        io::stdin().read_line(&mut rv)?;
+        let len = rv.trim_end_matches(&['\r', '\n'][..]).len();
+        rv.truncate(len);
+        Ok(rv)
+    }
+
     /// Read one character from the user input
     fn read_char(&self) -> Result<char>;
     /// Read the input asynchronously from the user.
