@@ -11,6 +11,9 @@ exclude = ["target", "Cargo.lock"]
 readme = "README.md"
 edition = "2018"
 
+[badges]
+maintenance = { status = "deprecated" }
+
 [target.'cfg(windows)'.dependencies]
 winapi = { version =  "0.3.8", features = ["winnt", "winuser"] }
 crossterm_winapi = { git = "https://github.com/crossterm-rs/crossterm-winapi.git", branch = "master", version = "0.2.1" }
