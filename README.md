@@ -16,15 +16,6 @@ see [Tested Terminals](https://github.com/crossterm-rs/crossterm/blob/master/REA
 directly, but it's **highly recommended** to use the [crossterm](https://crates.io/crates/crossterm) crate with
 the `input` feature enabled.
 
-## Future
-
-> The `crossterm_input` crate code will be moved to the `crossterm` crate (it's reexported there now).
-> Date is not set yet, but it doesn't make a lot of sense to start a new project with it. Please, use
-> the `crossterm` crate with the `input` feature enabled.
-
-Issues in this repository are disabled for the same reason. Please, report all issues in the
-[crossterm-rs/crossterm](https://github.com/crossterm-rs/crossterm/issues) repository.
-
 ## Features
 
 - Cross-platform
