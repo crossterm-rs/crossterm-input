@@ -1,4 +1,4 @@
-# Version master
+# Version 0.5.0
 
 - Internal refactoring (no breaking changes)
 - Removed unsafe `static mut`
