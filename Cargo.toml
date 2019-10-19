@@ -16,7 +16,7 @@ maintenance = { status = "deprecated" }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version =  "0.3.8", features = ["winnt", "winuser"] }
-crossterm_winapi = { version = "0.2.2" }
+crossterm_winapi = { version = "0.3.0" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.51"
