@@ -1,22 +1,23 @@
-use crate::rewrite::InputSource;
-use crate::InputEvent;
 use std::sync::mpsc::Receiver;
 use std::sync::Mutex;
 
-pub struct FakeInputSource {
+use crate::rewrite::EventSource;
+use crate::InputEvent;
+
+pub struct FakeEventSource {
     input_receiver: Mutex<Receiver<InputEvent>>,
 }
 
-impl FakeInputSource {
-    pub fn new(input_receiver: Receiver<InputEvent>) -> FakeInputSource {
-        FakeInputSource {
+impl FakeEventSource {
+    pub fn new(input_receiver: Receiver<InputEvent>) -> FakeEventSource {
+        FakeEventSource {
             input_receiver: Mutex::new(input_receiver),
         }
     }
 }
 
-impl InputSource for FakeInputSource {
-    fn input_event(&mut self) -> crossterm_utils::Result<Option<InputEvent>> {
+impl EventSource for FakeEventSource {
+    fn read_event(&mut self) -> crossterm_utils::Result<Option<InputEvent>> {
         let input_receiver = self
             .input_receiver
             .lock()

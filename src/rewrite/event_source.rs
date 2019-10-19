@@ -6,8 +6,8 @@ pub mod tty;
 #[cfg(windows)]
 pub mod winapi;
 
-pub trait InputSource: Sync + Send {
-    fn input_event(&mut self) -> crossterm_utils::Result<Option<InputEvent>>;
+pub trait EventSource: Sync + Send {
+    fn read_event(&mut self) -> crossterm_utils::Result<Option<InputEvent>>;
 }
 
 pub struct ModifierState {

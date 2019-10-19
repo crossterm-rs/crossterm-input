@@ -9,11 +9,10 @@ use std::time::Duration;
 use std::{fs, io, thread};
 
 use crossterm_utils::{ErrorKind, Result};
+use lazy_static::lazy_static;
 use libc::{c_int, c_void, size_t, ssize_t};
 use mio::unix::EventedFd;
 use mio::{Events, Poll, PollOpt, Ready, Token};
-
-use lazy_static::lazy_static;
 
 use crate::{InputEvent, InternalEvent, KeyEvent, MouseButton, MouseEvent};
 
@@ -271,77 +270,63 @@ pub struct TtyPoll {
 
 // Tokens to identify file descriptor
 const TTY_TOKEN: Token = Token(0);
-const SHUTDOWN_TOKEN: Token = Token(1);
 
 impl TtyPoll {
     pub fn new(tty_fd: FileDesc) -> TtyPoll {
         // Get raw file descriptors for
         let tty_raw_fd = tty_fd.raw_fd();
-        let shutdown_rx_raw_fd = shutdown_rx_fd.raw_fd();
 
         // Setup polling with raw file descriptors
         let tty_ev = EventedFd(&tty_raw_fd);
-        let shutdown_ev = EventedFd(&shutdown_rx_raw_fd);
 
-        let poll = Poll::new()?;
-        poll.register(&tty_ev, TTY_TOKEN, Ready::readable(), PollOpt::level())?;
-        poll.register(
-            &shutdown_ev,
-            SHUTDOWN_TOKEN,
-            Ready::readable(),
-            PollOpt::level(),
-        )?;
+        let poll = Poll::new().unwrap();
+        poll.register(&tty_ev, TTY_TOKEN, Ready::readable(), PollOpt::level())
+            .unwrap();
 
         TtyPoll { poll, tty_fd }
     }
 
-    pub fn tty_poll(&mut self) -> Result<Option<InternalEvent>> {
+    pub(crate) fn tty_poll(&mut self) -> Result<Option<InternalEvent>> {
         let mut events = Events::with_capacity(2);
         let mut buffer: Vec<u8> = Vec::with_capacity(32);
 
         let get_tokens =
             |events: &Events| -> Vec<Token> { events.iter().map(|ev| ev.token()).collect() };
 
-        // Wait for an event on provided raw file descriptors
-        // No timeout means indefinitely
-        self.poll.poll(&mut events, None)?;
+        loop {
+            // Wait for an event on provided raw file descriptors
+            // No timeout means indefinitely
+            self.poll.poll(&mut events, None)?;
 
-        // Get tokens to identify file descriptors
-        let tokens = get_tokens(&events);
+            // Get tokens to identify file descriptors
+            let tokens = get_tokens(&events);
 
-        if tokens.contains(&SHUTDOWN_TOKEN) {
-            break;
-        }
+            if tokens.contains(&TTY_TOKEN) {
+                // There's an event on tty
+                if let Ok(byte) = self.tty_fd.read_byte() {
+                    // Poll again to check if there's still anything to read when we read one byte.
+                    // This time with 0 timeout which means return immediately.
+                    //
+                    // We need this information to distinguish between Esc key and possible
+                    // Esc sequence.
+                    self.poll.poll(&mut events, Some(Duration::from_secs(0)))?;
 
-        if tokens.contains(&TTY_TOKEN) {
-            // There's an event on tty
-            if let Ok(byte) = tty_fd.read_byte() {
-                // Poll again to check if there's still anything to read when we read one byte.
-                // This time with 0 timeout which means return immediately.
-                //
-                // We need this information to distinguish between Esc key and possible
-                // Esc sequence.
-                self.poll.poll(&mut events, Some(Duration::from_secs(0)))?;
+                    let tokens = get_tokens(&events);
 
-                let tokens = get_tokens(&events);
+                    let input_available = tokens.contains(&TTY_TOKEN);
 
-                if tokens.contains(&SHUTDOWN_TOKEN) {
-                    break;
-                }
-
-                let input_available = tokens.contains(&TTY_TOKEN);
-
-                buffer.push(byte);
-                match parse_event(&buffer, input_available) {
-                    // Not enough info to parse the event, wait for more bytes
-                    Ok(None) => {}
-                    // Clear the input buffer and send the event
-                    Ok(Some(event)) => {
-                        buffer.clear();
-                        return Ok(Some(event));
+                    buffer.push(byte);
+                    match parse_event(&buffer, input_available) {
+                        // Not enough info to parse the event, wait for more bytes
+                        Ok(None) => {}
+                        // Clear the input buffer and send the event
+                        Ok(Some(event)) => {
+                            buffer.clear();
+                            return Ok(Some(event));
+                        }
+                        // Malformed sequence, clear the buffer
+                        Err(_) => buffer.clear(),
                     }
-                    // Malformed sequence, clear the buffer
-                    Err(_) => buffer.clear(),
                 }
             }
         }

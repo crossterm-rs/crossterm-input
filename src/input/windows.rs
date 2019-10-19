@@ -12,6 +12,11 @@ use std::{
 };
 
 use crossterm_utils::Result;
+use crossterm_winapi::{
+    ButtonState, Console, ConsoleMode, EventFlags, Handle, InputEventType, KeyEventRecord,
+    MouseEvent,
+};
+use lazy_static::lazy_static;
 use winapi::um::{
     wincon::{
         LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED, RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED, SHIFT_PRESSED,
@@ -23,12 +28,6 @@ use winapi::um::{
         VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_UP,
     },
 };
-
-use crossterm_winapi::{
-    ButtonState, Console, ConsoleMode, EventFlags, Handle, InputEventType, KeyEventRecord,
-    MouseEvent,
-};
-use lazy_static::lazy_static;
 
 use crate::{input::Input, InputEvent, KeyEvent, MouseButton};
 

@@ -1,23 +1,25 @@
-use crate::InputEvent;
-use shrev::{self, EventChannel, ReaderId};
 use std::sync::{Arc, LockResult, RwLock, RwLockWriteGuard};
 
+use shrev::{self, ReaderId};
+
+use crate::InputEvent;
+
 /// Single producer multiple consumers channel (SPMC) for input sharing.
-pub(crate) struct InputEventChannel {
-    event_channel: Arc<RwLock<EventChannel<InputEvent>>>,
+pub(crate) struct EventChannel {
+    event_channel: Arc<RwLock<shrev::EventChannel<InputEvent>>>,
 }
 
-impl<'b> InputEventChannel {
+impl<'b> EventChannel {
     /// Constructs a new spmc `InputEventChannel`.
-    pub(crate) fn channel(event_channel: EventChannel<InputEvent>) -> InputEventChannel {
-        InputEventChannel {
+    pub(crate) fn channel(event_channel: shrev::EventChannel<InputEvent>) -> EventChannel {
+        EventChannel {
             event_channel: Arc::new(RwLock::new(event_channel)),
         }
     }
 
     /// Constructs a new consumer for consuming input events.
-    pub(crate) fn new_consumer(&self) -> InputEventConsumer {
-        InputEventConsumer::new(self.event_channel.clone())
+    pub(crate) fn new_consumer(&self) -> EventConsumer {
+        EventConsumer::new(self.event_channel.clone())
     }
 
     /// Tries to acquire the producer that can sent input events to the consumers.
@@ -28,15 +30,17 @@ impl<'b> InputEventChannel {
 }
 
 /// The consumer that consumers input events from the producer.
-pub(crate) struct InputEventConsumer {
+pub(crate) struct EventConsumer {
     // TODO: I could't find a way to store the Reader Lock here instead of the whole channel.
-    event_channel: Arc<RwLock<EventChannel<InputEvent>>>,
+    event_channel: Arc<RwLock<shrev::EventChannel<InputEvent>>>,
     read_id: ReaderId<InputEvent>,
 }
 
-impl InputEventConsumer {
-    pub(crate) fn new(event_channel: Arc<RwLock<EventChannel<InputEvent>>>) -> InputEventConsumer {
-        InputEventConsumer {
+impl EventConsumer {
+    pub(crate) fn new(
+        event_channel: Arc<RwLock<shrev::EventChannel<InputEvent>>>,
+    ) -> EventConsumer {
+        EventConsumer {
             read_id: event_channel.write().unwrap().register_reader(),
             event_channel: event_channel.clone(),
         }
@@ -58,12 +62,12 @@ impl InputEventConsumer {
 
 /// An acquired write lock to the event channel producer.
 pub(crate) struct ProducerLock<'a> {
-    lock_result: LockResult<RwLockWriteGuard<'a, EventChannel<InputEvent>>>,
+    lock_result: LockResult<RwLockWriteGuard<'a, shrev::EventChannel<InputEvent>>>,
 }
 
 impl<'a> ProducerLock<'a> {
     pub(crate) fn from_lock_result(
-        lock_result: LockResult<RwLockWriteGuard<'a, EventChannel<InputEvent>>>,
+        lock_result: LockResult<RwLockWriteGuard<'a, shrev::EventChannel<InputEvent>>>,
     ) -> ProducerLock<'a> {
         ProducerLock { lock_result }
     }
@@ -78,11 +82,13 @@ impl<'a> ProducerLock<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::rewrite::input_stream::InputStream;
-    use crate::rewrite::spmc::InputEventConsumer;
-    use crate::{InputEvent, KeyEvent, MouseEvent};
-    use shrev::EventChannel;
     use std::sync::{Arc, RwLock};
+
+    use shrev::EventChannel;
+
+    use crate::rewrite::event_stream::EventStream;
+    use crate::rewrite::spmc::EventConsumer;
+    use crate::{InputEvent, KeyEvent, MouseEvent};
 
     #[test]
     pub fn test_read_all_events() {
@@ -102,8 +108,8 @@ mod tests {
         assert_eq!(consumer.read_all(), input_events);
     }
 
-    fn event_consumer() -> (Arc<RwLock<EventChannel<InputEvent>>>, InputEventConsumer) {
+    fn event_consumer() -> (Arc<RwLock<EventChannel<InputEvent>>>, EventConsumer) {
         let mut channel = Arc::new(RwLock::new(EventChannel::new()));
-        (channel.clone(), InputEventConsumer::new(channel))
+        (channel.clone(), EventConsumer::new(channel))
     }
 }

@@ -50,6 +50,8 @@ use self::input::unix::UnixInput;
 use self::input::windows::WindowsInput;
 use self::input::Input;
 pub use self::input::{AsyncReader, SyncReader};
+#[cfg(unix)]
+pub use self::rewrite::{EventSource, TTYEventSource};
 
 mod input;
 mod rewrite;
@@ -182,7 +184,7 @@ pub enum KeyEvent {
 /// events that shouldn't be publicly available to the crate users.
 #[cfg(unix)]
 #[derive(Debug, PartialOrd, PartialEq, Hash, Clone)]
-pub(crate) enum InternalEvent {
+pub enum InternalEvent {
     /// An input event.
     Input(InputEvent),
     /// A cursor position (`x`, `y`).

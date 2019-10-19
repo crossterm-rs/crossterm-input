@@ -1,56 +1,55 @@
-use crate::rewrite::input_stream::InputStream;
-use crate::rewrite::InputSource;
+use std::sync::{LockResult, Mutex, MutexGuard};
+
 use crossterm_utils::Result;
 use lazy_static::lazy_static;
 
+use crate::rewrite::event_stream::EventStream;
+use crate::rewrite::spmc::EventChannel;
+use crate::rewrite::EventSource;
 #[cfg(unix)]
-use crate::rewrite::TTYInputSource;
+use crate::rewrite::TTYEventSource;
 #[cfg(windows)]
-use crate::rewrite::WinApiInputSource;
-
-use crate::rewrite::spmc::InputEventChannel;
-use shrev::EventChannel;
-use std::sync::{LockResult, Mutex, MutexGuard};
+use crate::rewrite::WinApiEventSource;
 
 lazy_static! {
     /// Static input pool that can be used to read input events.
-    pub static ref INPUT: Mutex<InputPool> = { Mutex::new(InputPool::new()) };
+    pub static ref INPUT: Mutex<EventPool> = { Mutex::new(EventPool::new()) };
 }
 
 /// An input pool is a pool that takes care of polling for new input.
 /// Before you are able to use the input pool, you have to acquire a lock for it.
 /// That prevents race conditions while reading input from certain sources.
-pub struct InputPool {
-    event_channel: InputEventChannel,
-    input_source: Box<dyn InputSource>,
+pub struct EventPool {
+    event_channel: EventChannel,
+    event_source: Box<dyn EventSource>,
 }
 
-impl InputPool {
-    pub(crate) fn new() -> InputPool {
+impl EventPool {
+    pub(crate) fn new() -> EventPool {
         #[cfg(windows)]
-        let input = WinApiInputSource::new();
+        let input = WinApiEventSource::new();
         #[cfg(unix)]
-        let input = TTYInputSource::new();
+        let input = TTYEventSource::new();
 
-        InputPool {
-            input_source: Box::new(input) as Box<dyn InputSource + Sync + Send>,
-            event_channel: InputEventChannel::channel(EventChannel::new()),
+        EventPool {
+            event_source: Box::new(input) as Box<dyn EventSource + Sync + Send>,
+            event_channel: EventChannel::channel(shrev::EventChannel::new()),
         }
     }
 
     /// Acquires the `InputPool`, this can be used when you want mutable access to this pool.
-    pub fn lock() -> LockResult<MutexGuard<'static, InputPool>> {
+    pub fn lock() -> LockResult<MutexGuard<'static, EventPool>> {
         INPUT.lock()
     }
 
     /// Changes the default input source to the given input source.
-    pub fn set_input_source(&mut self, input_source: Box<dyn InputSource>) {
-        self.input_source = input_source;
+    pub fn set_event_source(&mut self, event_source: Box<dyn EventSource>) {
+        self.event_source = event_source;
     }
 
     /// Returns a input stream that can be used to read input events with.
-    pub fn acquire_stream(&self) -> InputStream {
-        InputStream::new(self.event_channel.new_consumer())
+    pub fn acquire_stream(&self) -> EventStream {
+        EventStream::new(self.event_channel.new_consumer())
     }
 
     /// Polls for input from the underlying input source.
@@ -59,12 +58,10 @@ impl InputPool {
     /// This poll function will block read for a single key press.
     pub fn poll(&mut self) -> Result<()> {
         // poll for occurred input events
-        let input_event = self.input_source.input_event()?.unwrap();
+        let event = self.event_source.read_event()?.unwrap();
 
         // produce the input event for the consumers
-        self.event_channel
-            .producer()
-            .produce_input_event(input_event);
+        self.event_channel.producer().produce_input_event(event);
 
         Ok(())
     }
@@ -76,20 +73,21 @@ impl InputPool {
 
 #[cfg(test)]
 mod tests {
-    use crate::rewrite::input_pool::InputPool;
-    use crate::rewrite::input_source::fake::FakeInputSource;
-    use crate::{InputEvent, KeyEvent, MouseEvent};
     use std::sync::mpsc::channel;
+
+    use crate::rewrite::event_pool::EventPool;
+    use crate::rewrite::event_source::fake::FakeEventSource;
+    use crate::{InputEvent, KeyEvent, MouseEvent};
 
     #[test]
     pub fn test_read_input_multiple_consumers() {
-        let mut input_pool = InputPool::lock().unwrap();
+        let mut input_pool = EventPool::lock().unwrap();
 
         // sender can be used to send fake data, receiver is used to provide the fake input source with input events.
         let (input_sender, input_receiver) = channel();
 
         // set input source, and sent fake input
-        input_pool.set_input_source(Box::new(FakeInputSource::new(input_receiver)));
+        input_pool.set_event_source(Box::new(FakeEventSource::new(input_receiver)));
         input_sender.send(InputEvent::Unknown);
 
         // acquire consumers

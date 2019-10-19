@@ -1,16 +1,16 @@
-mod event_iterator;
-mod input_pool;
-mod input_source;
-mod input_stream;
-mod spmc;
+#[cfg(unix)]
+pub use event_source::tty::TTYEventSource;
+#[cfg(windows)]
+pub use event_source::winapi::WinApiEventSource;
 
 pub use self::{
     event_iterator::{EventIterator, IntoEventIterator},
-    input_source::InputSource,
-    input_stream::InputStream,
+    event_source::EventSource,
+    event_stream::EventStream,
 };
 
-#[cfg(unix)]
-pub use input_source::tty::TTYInputSource;
-#[cfg(windows)]
-pub use input_source::winapi::WinApiInputSource;
+mod event_iterator;
+mod event_pool;
+mod event_source;
+mod event_stream;
+mod spmc;

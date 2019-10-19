@@ -1,24 +1,25 @@
-use crate::input::windows::read_single_event;
-use crate::rewrite::input_source::InputSource;
-use crate::InputEvent;
 use crossterm_utils::Result;
 use crossterm_winapi::{Console, Handle, InputEventType, KeyEventRecord, MouseEvent};
 
-pub struct WinApiInputSource;
+use crate::input::windows::read_single_event;
+use crate::rewrite::event_source::EventSource;
+use crate::InputEvent;
 
-impl WinApiInputSource {
-    pub fn new() -> WinApiInputSource {
-        WinApiInputSource
+pub struct WinApiEventSource;
+
+impl WinApiEventSource {
+    pub fn new() -> WinApiEventSource {
+        WinApiEventSource
     }
 }
 
-impl InputSource for WinApiInputSource {
-    fn input_event(&mut self) -> Result<Option<InputEvent>> {
+impl EventSource for WinApiEventSource {
+    fn read_event(&mut self) -> Result<Option<InputEvent>> {
         read_single_event()
     }
 }
 
-impl WinApiInputSource {
+impl WinApiEventSource {
     pub fn read_single_event() -> Result<Option<InputEvent>> {
         let console = Console::from(Handle::current_in_handle()?);
 
