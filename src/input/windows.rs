@@ -390,7 +390,7 @@ fn read_input_events() -> Result<(u32, Vec<InputEvent>)> {
 }
 
 fn handle_mouse_event(mouse_event: MouseEvent) -> Result<Option<InputEvent>> {
-    if let Some(event) = parse_mouse_event_record(&mouse_event) {
+    if let Ok(Some(event)) = parse_mouse_event_record(&mouse_event) {
         return Ok(Some(InputEvent::Mouse(event)));
     }
     Ok(None)
@@ -530,19 +530,14 @@ fn parse_key_event_record(key_event: &KeyEventRecord) -> Option<KeyEvent> {
     }
 }
 
-fn parse_mouse_event_record(event: &MouseEvent) -> Option<crate::MouseEvent> {
+fn parse_mouse_event_record(event: &MouseEvent) -> Result<Option<crate::MouseEvent>> {
     // NOTE (@imdaveho): xterm emulation takes the digits of the coords and passes them
     // individually as bytes into a buffer; the below cxbs and cybs replicates that and
     // mimicks the behavior; additionally, in xterm, mouse move is only handled when a
     // mouse button is held down (ie. mouse drag)
 
-    let window_size = ScreenBuffer::current()
-        .unwrap()
-        .info()
-        .unwrap()
-        .terminal_window();
+    let window_size = ScreenBuffer::current().unwrap().info()?.terminal_window();
 
-    // Windows returns (0, 0) for upper/left
     let xpos = event.mouse_position.x;
     let mut ypos = event.mouse_position.y;
 
@@ -550,8 +545,7 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<crate::MouseEvent> {
     // This means that when the mouse cursor is at top left it will be x: 0, y: 2295 (e.g. y = number of cells counting from the absolute buffer height) instead of relative x: 0, y: 0 to the window.
     ypos = ypos - window_size.top;
 
-    // TODO (@imdaveho): check if linux only provides coords for visible terminal window vs the total buffer
-    match event.event_flags {
+    Ok(match event.event_flags {
         EventFlags::PressOrRelease => {
             // Single click
             match event.button_state {
@@ -613,5 +607,5 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<crate::MouseEvent> {
         EventFlags::DoubleClick => None, // NOTE (@imdaveho): double click not supported by unix terminals
         EventFlags::MouseHwheeled => None, // NOTE (@imdaveho): horizontal scroll not supported by unix terminals
                                            // TODO: Handle Ctrl + Mouse, Alt + Mouse, etc.
-    }
+    })
 }
