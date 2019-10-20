@@ -536,7 +536,7 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Result<Option<crate::MouseEve
     // mimicks the behavior; additionally, in xterm, mouse move is only handled when a
     // mouse button is held down (ie. mouse drag)
 
-    let window_size = ScreenBuffer::current().unwrap().info()?.terminal_window();
+    let window_size = ScreenBuffer::current()?.info()?.terminal_window();
 
     let xpos = event.mouse_position.x;
     let mut ypos = event.mouse_position.y;
