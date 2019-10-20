@@ -12,11 +12,6 @@ pub use self::unix::{AsyncReader, SyncReader};
 #[cfg(windows)]
 pub use self::windows::{AsyncReader, SyncReader};
 
-#[cfg(unix)]
-pub(crate) mod unix;
-#[cfg(windows)]
-pub(crate) mod windows;
-
 /// This trait defines the actions that can be performed with the terminal input.
 /// This trait can be implemented so that a concrete implementation of the ITerminalInput can fulfill
 /// the wishes to work on a specific platform.

@@ -1,7 +1,7 @@
 use std::sync::mpsc::Receiver;
 use std::sync::Mutex;
 
-use crate::rewrite::EventSource;
+use crate::EventSource;
 use crate::InputEvent;
 
 pub struct FakeEventSource {

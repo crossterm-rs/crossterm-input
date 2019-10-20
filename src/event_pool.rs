@@ -1,15 +1,16 @@
-use std::sync::{LockResult, Mutex, MutexGuard};
+use std::sync::{LockResult, Mutex, MutexGuard, RwLockWriteGuard, PoisonError};
 
 use crossterm_utils::Result;
 use lazy_static::lazy_static;
 
-use crate::rewrite::event_stream::EventStream;
-use crate::rewrite::spmc::EventChannel;
-use crate::rewrite::EventSource;
+use crate::event_stream::EventStream;
+use crate::spmc::EventChannel;
+use crate::EventSource;
 #[cfg(unix)]
-use crate::rewrite::TTYEventSource;
+use crate::TTYEventSource;
 #[cfg(windows)]
-use crate::rewrite::WinApiEventSource;
+use crate::WinApiEventSource;
+use std::result;
 
 lazy_static! {
     /// Static input pool that can be used to read input events.
@@ -38,8 +39,8 @@ impl EventPool {
     }
 
     /// Acquires the `InputPool`, this can be used when you want mutable access to this pool.
-    pub fn lock() -> LockResult<MutexGuard<'static, EventPool>> {
-        INPUT.lock()
+    pub fn lock<'a>() -> PoolLock<'a> {
+        PoolLock::from_lock_result(INPUT.lock())
     }
 
     /// Changes the default input source to the given input source.
@@ -71,17 +72,39 @@ impl EventPool {
     pub fn disable_mouse_events() {}
 }
 
+/// An acquired write lock to the event channel producer.
+pub(crate) struct PoolLock<'a> {
+    lock_result: result::Result<MutexGuard<'a, EventPool>, PoisonError<std::sync::MutexGuard<'a, EventPool>>>,
+}
+
+impl<'a> PoolLock<'a> {
+    pub(crate) fn from_lock_result(
+        lock_result: result::Result<MutexGuard<'a, EventPool>, PoisonError<std::sync::MutexGuard<'a, EventPool>>>,
+    ) -> PoolLock<'a> {
+        PoolLock { lock_result }
+    }
+
+    pub fn take(&mut self) -> &mut MutexGuard<'a, EventPool> {
+       &mut self.lock_result.as_mut().expect("Could not acquire lock")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc::channel;
 
-    use crate::rewrite::event_pool::EventPool;
-    use crate::rewrite::event_source::fake::FakeEventSource;
+    use crate::event_pool::EventPool;
+    use crate::event_source::fake::FakeEventSource;
     use crate::{InputEvent, KeyEvent, MouseEvent};
+    use std::sync::Mutex;
 
     #[test]
     pub fn test_read_input_multiple_consumers() {
-        let mut input_pool = EventPool::lock().unwrap();
+
+        let mutex = Mutex::new(1);
+        let r = mutex.lock().unwrap();
+
+        let mut input_pool = EventPool::lock().take();
 
         // sender can be used to send fake data, receiver is used to provide the fake input source with input events.
         let (input_sender, input_receiver) = channel();

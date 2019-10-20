@@ -1,5 +1,5 @@
-use crate::rewrite::spmc::EventConsumer;
-use crate::rewrite::{EventIterator, IntoEventIterator};
+use crate::spmc::EventConsumer;
+use crate::{EventIterator, IntoEventIterator};
 use crate::{InputEvent, KeyEvent, MouseEvent};
 
 /// An input stream that can be used to read occurred key events.
@@ -73,8 +73,8 @@ mod tests {
 
     use shrev::EventChannel;
 
-    use crate::rewrite::event_stream::EventStream;
-    use crate::rewrite::spmc::EventConsumer;
+    use crate::event_stream::EventStream;
+    use crate::spmc::EventConsumer;
     use crate::{InputEvent, KeyEvent, MouseEvent};
 
     #[test]

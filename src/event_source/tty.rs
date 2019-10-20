@@ -1,6 +1,6 @@
 use crossterm_utils::Result;
 
-use crate::rewrite::EventSource;
+use crate::EventSource;
 use crate::sys::unix::{tty_fd, FileDesc, TtyPoll};
 use crate::{InputEvent, InternalEvent};
 

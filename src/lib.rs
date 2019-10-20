@@ -45,17 +45,26 @@ pub use crossterm_utils::Result;
 use serde::{Deserialize, Serialize};
 
 #[cfg(unix)]
-use self::input::unix::UnixInput;
+use event_source::tty::TTYEventSource;
 #[cfg(windows)]
-use self::input::windows::WindowsInput;
-use self::input::Input;
-pub use self::input::{AsyncReader, SyncReader};
-#[cfg(unix)]
-pub use self::rewrite::{EventSource, TTYEventSource};
+use event_source::winapi::WinApiEventSource;
 
-mod input;
-mod rewrite;
+pub use self::{
+    event_iterator::{EventIterator, IntoEventIterator},
+    event_source::EventSource,
+    event_stream::EventStream,
+    event_pool::EventPool
+};
+
 mod sys;
+
+mod event_iterator;
+mod event_pool;
+mod event_source;
+mod event_stream;
+mod spmc;
+
+
 
 /// Represents an input event.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -202,231 +211,4 @@ impl From<InternalEvent> for Option<InputEvent> {
             InternalEvent::CursorPosition(x, y) => Some(InputEvent::CursorPosition(x, y)),
         }
     }
-}
-
-/// A terminal input.
-///
-/// # Examples
-///
-/// ```no_run
-/// // You can replace the following line with `use crossterm::...;`
-/// // if you're using the `crossterm` crate with the `input` feature enabled.
-/// use crossterm_input::{Result, TerminalInput, RawScreen};
-///
-/// fn main() -> Result<()> {
-///     let input = TerminalInput::new();
-///     // Read a single character
-///     let char = input.read_char()?;
-///     // Read a single line
-///     let line = input.read_line()?;
-///
-///     // Make sure to enable raw screen when reading input events
-///     let screen = RawScreen::into_raw_mode();
-///
-///     // Create async reader
-///     let mut async_stdin = input.read_async();
-///
-///     // Create sync reader
-///     let mut sync_stdin = input.read_sync();
-///
-///     // Enable mouse input events
-///     input.enable_mouse_mode()?;
-///     // Disable mouse input events
-///     input.disable_mouse_mode()
-/// }
-/// ```
-pub struct TerminalInput {
-    #[cfg(windows)]
-    input: WindowsInput,
-    #[cfg(unix)]
-    input: UnixInput,
-}
-
-impl TerminalInput {
-    /// Creates a new `TerminalInput`.
-    pub fn new() -> TerminalInput {
-        #[cfg(windows)]
-        let input = WindowsInput::new();
-
-        #[cfg(unix)]
-        let input = UnixInput::new();
-
-        TerminalInput { input }
-    }
-
-    /// Reads one line from the user input and strips the new line character(s).
-    ///
-    /// This function **does not work** when the raw mode is enabled (see the
-    /// [`crossterm_screen`](https://docs.rs/crossterm_screen/) crate documentation
-    /// to learn more). You should use the
-    /// [`read_async`](struct.TerminalInput.html#method.read_async),
-    /// [`read_until_async`](struct.TerminalInput.html#method.read_until_async)
-    /// or [`read_sync`](struct.TerminalInput.html#method.read_sync) method if the
-    /// raw mode is enabled.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// let input = crossterm_input::input();
-    /// match input.read_line() {
-    ///     Ok(s) => println!("string typed: {}", s),
-    ///     Err(e) => println!("error: {}", e),
-    /// }
-    /// ```
-    pub fn read_line(&self) -> Result<String> {
-        self.input.read_line()
-    }
-
-    /// Reads one character from the user input.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// let input = crossterm_input::input();
-    /// match input.read_char() {
-    ///     Ok(c) => println!("character pressed: {}", c),
-    ///     Err(e) => println!("error: {}", e),
-    /// }
-    /// ```
-    pub fn read_char(&self) -> Result<char> {
-        self.input.read_char()
-    }
-
-    /// Creates a new `AsyncReader` allowing to read the input asynchronously (not blocking).
-    ///
-    /// If you want a blocking, or less resource consuming read, see the
-    /// [`read_sync`](struct.TerminalInput.html#method.read_sync) method.
-    ///
-    /// # Notes
-    ///
-    /// * It requires enabled raw mode (see the
-    ///   [`crossterm_screen`](https://docs.rs/crossterm_screen/) crate documentation to learn more).
-    /// * A thread is spawned to read the input.
-    /// * The reading thread is cleaned up when you drop the [`AsyncReader`](struct.AsyncReader.html).
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::{thread, time::Duration};
-    /// use crossterm_input::input;
-    ///
-    /// let mut async_stdin = input().read_async();
-    ///
-    /// loop {
-    ///     if let Some(key_event) = async_stdin.next() {
-    ///         /* Check which event occurred here */
-    ///     }
-    ///
-    ///     thread::sleep(Duration::from_millis(50));
-    /// }
-    ///  ```
-    pub fn read_async(&self) -> AsyncReader {
-        self.input.read_async()
-    }
-
-    /// Creates a new `AsyncReader` allowing to read the input asynchronously (not blocking) until the
-    /// given `delimiter`.
-    ///
-    /// It behaves in the same way as the [`read_async`](struct.TerminalInput.html#method.read_async)
-    /// method, but it stops reading when the `delimiter` is hit.
-    ///
-    /// # Notes
-    ///
-    /// * It requires enabled raw mode (see the
-    ///   [`crossterm_screen`](https://docs.rs/crossterm_screen/) crate documentation to learn more).
-    /// * A thread is spawned to read the input.
-    /// * The reading thread is cleaned up when you drop the [`AsyncReader`](struct.AsyncReader.html).
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::{thread, time::Duration};
-    ///
-    /// let mut async_stdin = crossterm_input::input().read_until_async(b'x');
-    ///
-    /// loop {
-    ///     if let Some(key_event) = async_stdin.next() {
-    ///         /* Check which event occurred here */
-    ///     }
-    ///
-    ///     thread::sleep(Duration::from_millis(50));
-    /// }
-    ///  ```
-    pub fn read_until_async(&self, delimiter: u8) -> AsyncReader {
-        self.input.read_until_async(delimiter)
-    }
-
-    /// Creates a new `SyncReader` allowing to read the input synchronously (blocking).
-    ///
-    /// It's less resource hungry when compared to the
-    /// [`read_async`](struct.TerminalInput.html#method.read_async) method, because it doesn't
-    /// spawn any reading threads.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::{thread, time::Duration};
-    ///
-    /// let mut sync_stdin = crossterm_input::input().read_sync();
-    ///
-    /// loop {
-    ///     if let Some(key_event) = sync_stdin.next() {
-    ///         /* Check which event occurred here */
-    ///     }
-    /// }
-    ///  ```
-    pub fn read_sync(&self) -> SyncReader {
-        self.input.read_sync()
-    }
-
-    /// Enables mouse events.
-    ///
-    /// Mouse events will be produced by the
-    /// [`AsyncReader`](struct.AsyncReader.html)/[`SyncReader`](struct.SyncReader.html).
-    pub fn enable_mouse_mode(&self) -> Result<()> {
-        self.input.enable_mouse_mode()
-    }
-
-    /// Disables mouse events.
-    ///
-    /// Mouse events wont be produced by the
-    /// [`AsyncReader`](struct.AsyncReader.html)/[`SyncReader`](struct.SyncReader.html).
-    pub fn disable_mouse_mode(&self) -> Result<()> {
-        self.input.disable_mouse_mode()
-    }
-}
-
-/// Creates a new `TerminalInput`.
-///
-/// # Examples
-///
-/// ```no_run
-/// // You can replace the following line with `use crossterm::...;`
-/// // if you're using the `crossterm` crate with the `input` feature enabled.
-/// use crossterm_input::{input, RawScreen, Result};
-///
-/// fn main() -> Result<()> {
-///     let input = input();
-///     // Read a single character
-///     let char = input.read_char()?;
-///     // Read a single line
-///     let line = input.read_line()?;
-///
-///     // Make sure to enable raw screen when reading input events
-///     let screen = RawScreen::into_raw_mode();
-///
-///     // Create async reader
-///     let mut async_stdin = input.read_async();
-///
-///     // Create sync reader
-///     let mut sync_stdin = input.read_sync();
-///
-///     // Enable mouse input events
-///     input.enable_mouse_mode()?;
-///     // Disable mouse input events
-///     input.disable_mouse_mode()
-/// }
-/// ```
-pub fn input() -> TerminalInput {
-    TerminalInput::new()
 }

@@ -24,8 +24,7 @@ impl<'b> EventChannel {
 
     /// Tries to acquire the producer that can sent input events to the consumers.
     pub(crate) fn producer<'a>(&mut self) -> ProducerLock<'_> {
-        let a = self.event_channel.write();
-        ProducerLock::from_lock_result(a)
+        ProducerLock::from_lock_result(self.event_channel.write())
     }
 }
 
@@ -75,7 +74,7 @@ impl<'a> ProducerLock<'a> {
     pub(crate) fn produce_input_event(&mut self, input_event: InputEvent) {
         self.lock_result
             .as_mut()
-            .expect("can not aquire write lock")
+            .expect("can not acquire write lock")
             .single_write(input_event);
     }
 }
@@ -86,8 +85,8 @@ mod tests {
 
     use shrev::EventChannel;
 
-    use crate::rewrite::event_stream::EventStream;
-    use crate::rewrite::spmc::EventConsumer;
+    use crate::event_stream::EventStream;
+    use crate::spmc::EventConsumer;
     use crate::{InputEvent, KeyEvent, MouseEvent};
 
     #[test]
