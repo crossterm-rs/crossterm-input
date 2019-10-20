@@ -541,8 +541,9 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Result<Option<crate::MouseEve
     let xpos = event.mouse_position.x;
     let mut ypos = event.mouse_position.y;
 
-    // The y position in with a mouse event is not relative to the window but absolute to screen buffer.
-    // This means that when the mouse cursor is at top left it will be x: 0, y: 2295 (e.g. y = number of cells counting from the absolute buffer height) instead of relative x: 0, y: 0 to the window.
+    // The 'y' position of a mouse event is not relative to the window but absolute to screen buffer.
+    // This means that when the mouse cursor is at the top left it will be x: 0, y: 2295 (e.g. y = number of cells counting from the absolute buffer height) instead of relative x: 0, y: 0 to the window.
+
     ypos = ypos - window_size.top;
 
     Ok(match event.event_flags {
