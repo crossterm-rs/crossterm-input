@@ -24,10 +24,7 @@ use winapi::um::{
     },
 };
 
-use crossterm_winapi::{
-    ButtonState, Console, ConsoleMode, EventFlags, Handle, InputEventType, KeyEventRecord,
-    MouseEvent,
-};
+use crossterm_winapi::{ButtonState, Console, ConsoleMode, EventFlags, Handle, InputEventType, KeyEventRecord, MouseEvent, ScreenBuffer};
 use lazy_static::lazy_static;
 
 use crate::{input::Input, InputEvent, KeyEvent, MouseButton};
@@ -536,12 +533,17 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<crate::MouseEvent> {
     // mimicks the behavior; additionally, in xterm, mouse move is only handled when a
     // mouse button is held down (ie. mouse drag)
 
+    let window_size = ScreenBuffer::current().unwrap().info().unwrap().terminal_window();
+
     // Windows returns (0, 0) for upper/left
     let xpos = event.mouse_position.x;
-    let ypos = event.mouse_position.y;
+    let mut ypos = event.mouse_position.y;
+
+    // The y position in with a mouse event is not relative to the window but absolute to screen buffer.
+    // This means that when the mouse cursor is at top left it will be x: 0, y: 2295 (e.g. y = number of cells counting from the top of the buffer) instead of relative x: 0, y: 0 to the window.
+    ypos = ypos - window_size.top;
 
     // TODO (@imdaveho): check if linux only provides coords for visible terminal window vs the total buffer
-
     match event.event_flags {
         EventFlags::PressOrRelease => {
             // Single click
