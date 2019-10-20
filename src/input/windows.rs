@@ -24,7 +24,10 @@ use winapi::um::{
     },
 };
 
-use crossterm_winapi::{ButtonState, Console, ConsoleMode, EventFlags, Handle, InputEventType, KeyEventRecord, MouseEvent, ScreenBuffer};
+use crossterm_winapi::{
+    ButtonState, Console, ConsoleMode, EventFlags, Handle, InputEventType, KeyEventRecord,
+    MouseEvent, ScreenBuffer,
+};
 use lazy_static::lazy_static;
 
 use crate::{input::Input, InputEvent, KeyEvent, MouseButton};
@@ -533,7 +536,11 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<crate::MouseEvent> {
     // mimicks the behavior; additionally, in xterm, mouse move is only handled when a
     // mouse button is held down (ie. mouse drag)
 
-    let window_size = ScreenBuffer::current().unwrap().info().unwrap().terminal_window();
+    let window_size = ScreenBuffer::current()
+        .unwrap()
+        .info()
+        .unwrap()
+        .terminal_window();
 
     // Windows returns (0, 0) for upper/left
     let xpos = event.mouse_position.x;
