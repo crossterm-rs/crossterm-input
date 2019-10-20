@@ -547,7 +547,7 @@ fn parse_mouse_event_record(event: &MouseEvent) -> Option<crate::MouseEvent> {
     let mut ypos = event.mouse_position.y;
 
     // The y position in with a mouse event is not relative to the window but absolute to screen buffer.
-    // This means that when the mouse cursor is at top left it will be x: 0, y: 2295 (e.g. y = number of cells counting from the top of the buffer) instead of relative x: 0, y: 0 to the window.
+    // This means that when the mouse cursor is at top left it will be x: 0, y: 2295 (e.g. y = number of cells counting from the absolute buffer height) instead of relative x: 0, y: 0 to the window.
     ypos = ypos - window_size.top;
 
     // TODO (@imdaveho): check if linux only provides coords for visible terminal window vs the total buffer
