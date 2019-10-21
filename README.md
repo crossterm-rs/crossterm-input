@@ -2,6 +2,12 @@
 
 # Crossterm Input
 
+**The `crossterm_input` crate is deprecated and no longer maintained. The GitHub repository will
+be archived soon. All the code is being moved to the `crossterm`
+[crate](https://github.com/crossterm-rs/crossterm). You can learn more in the
+[Merge sub-crates to the crossterm crate](https://github.com/crossterm-rs/crossterm/issues/265)
+issue.**
+
 This crate allows you to read the user input cross-platform. 
 It supports all UNIX and Windows terminals down to Windows 7 (not all terminals are tested
 see [Tested Terminals](https://github.com/crossterm-rs/crossterm/blob/master/README.md#tested-terminals) for more info).
@@ -9,15 +15,6 @@ see [Tested Terminals](https://github.com/crossterm-rs/crossterm/blob/master/REA
 `crossterm_input` is a sub-crate of the [crossterm](https://crates.io/crates/crossterm) crate. You can use it
 directly, but it's **highly recommended** to use the [crossterm](https://crates.io/crates/crossterm) crate with
 the `input` feature enabled.
-
-## Future
-
-> The `crossterm_input` crate code will be moved to the `crossterm` crate (it's reexported there now).
-> Date is not set yet, but it doesn't make a lot of sense to start a new project with it. Please, use
-> the `crossterm` crate with the `input` feature enabled.
-
-Issues in this repository are disabled for the same reason. Please, report all issues in the
-[crossterm-rs/crossterm](https://github.com/crossterm-rs/crossterm/issues) repository.
 
 ## Features
 
